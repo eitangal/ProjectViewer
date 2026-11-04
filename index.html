@@ -5,6 +5,23 @@
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><path d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GitLens-Portal (ProjectViewer)</title>
+    <script>
+      (function() {
+        try {
+          var stored = localStorage.getItem('gitportal-viewer-prefs');
+          var theme = stored ? JSON.parse(stored)?.state?.theme : null;
+          if (theme === 'light') {
+            document.documentElement.classList.add('light');
+            document.documentElement.setAttribute('data-theme', 'light');
+            document.documentElement.style.colorScheme = 'light';
+          } else {
+            document.documentElement.classList.add('dark');
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.documentElement.style.colorScheme = 'dark';
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body class="bg-slate-950 text-slate-100">
     <div id="root"></div>

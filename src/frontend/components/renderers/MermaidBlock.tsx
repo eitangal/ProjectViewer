@@ -1,15 +1,10 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import mermaid from 'mermaid';
 import { ZoomIn, ZoomOut, RotateCcw, Copy, Check } from 'lucide-react';
-
-mermaid.initialize({
-  startOnLoad: false,
-  theme: 'dark',
-  securityLevel: 'strict',
-  fontFamily: 'Inter, system-ui, sans-serif',
-});
+import { useViewerStore } from '../../store/useViewerStore.js';
 
 export const MermaidBlock: React.FC<{ chart: string }> = ({ chart }) => {
+  const { theme } = useViewerStore();
   const rawId = useId();
   const id = 'mermaid_' + rawId.replace(/[^a-zA-Z0-9]/g, '');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -21,6 +16,13 @@ export const MermaidBlock: React.FC<{ chart: string }> = ({ chart }) => {
   useEffect(() => {
     let isMounted = true;
     try {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: theme === 'light' ? 'default' : 'dark',
+        securityLevel: 'strict',
+        fontFamily: 'Inter, system-ui, sans-serif',
+      });
+
       mermaid
         .render(id, chart)
         .then(({ svg }) => {
@@ -39,7 +41,7 @@ export const MermaidBlock: React.FC<{ chart: string }> = ({ chart }) => {
     return () => {
       isMounted = false;
     };
-  }, [chart, id]);
+  }, [chart, id, theme]);
 
   const handleCopySource = () => {
     navigator.clipboard.writeText(chart);

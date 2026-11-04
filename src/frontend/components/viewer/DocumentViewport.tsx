@@ -19,7 +19,6 @@ export const DocumentViewport: React.FC<{
     activeFilePath,
     activeHash,
     viewMode,
-    contentWidth,
     projectId: storeProjectId,
     isAiDrawerOpen,
     isAiDrawerMaximized,
@@ -127,7 +126,7 @@ export const DocumentViewport: React.FC<{
       ref={viewportRef}
       className={`flex-1 min-w-0 overflow-y-auto px-6 py-6 md:px-10 bg-slate-950 relative ${hiddenClass}`}
     >
-      <div className={contentWidth === 'full' ? 'w-full min-h-full' : 'max-w-5xl mx-auto min-h-full'}>
+      <div className="w-full min-h-full">
         {viewMode === 'raw' ? (
           <RawCodeRenderer code={content} filePath={activeFilePath} />
         ) : (

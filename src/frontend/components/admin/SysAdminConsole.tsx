@@ -21,6 +21,7 @@ import {
   Sparkles,
   ExternalLink,
 } from 'lucide-react';
+import { ThemeAndUserControls } from '../common/ThemeAndUserControls.js';
 
 export const SysAdminConsole: React.FC<{
   publishers: any[];
@@ -34,6 +35,7 @@ export const SysAdminConsole: React.FC<{
   onUpdatePublisher: (userId: string, data: any) => Promise<void>;
   onRefreshTelemetry: () => Promise<void>;
   onLogout: () => void;
+  user?: { email: string; role?: string; globalRole?: string } | null;
 }> = ({
   publishers,
   telemetry,
@@ -41,6 +43,7 @@ export const SysAdminConsole: React.FC<{
   onUpdatePublisher,
   onRefreshTelemetry,
   onLogout,
+  user,
 }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'smtp'>('overview');
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -246,13 +249,13 @@ export const SysAdminConsole: React.FC<{
             <RefreshCw size={15} />
           </button>
 
-          <button
-            onClick={onLogout}
-            title="Sign Out"
-            className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors"
-          >
-            <LogOut size={15} />
-          </button>
+          <ThemeAndUserControls
+            user={user}
+            onLogout={onLogout}
+            showUser={true}
+            showTheme={true}
+            showLogout={true}
+          />
         </div>
       </header>
 

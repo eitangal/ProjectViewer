@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { ApiReferenceReact } from '@scalar/api-reference-react';
 import '@scalar/api-reference-react/style.css';
+import { useViewerStore } from '../../store/useViewerStore.js';
 
 export const OpenApiSpecRenderer: React.FC<{ rawSpec: string }> = ({ rawSpec }) => {
   const [hasError, setHasError] = useState(false);
+  const { theme } = useViewerStore();
 
   if (hasError) {
     return (
@@ -24,7 +26,7 @@ export const OpenApiSpecRenderer: React.FC<{ rawSpec: string }> = ({ rawSpec }) 
           spec: {
             content: rawSpec,
           },
-          darkMode: true,
+          darkMode: theme === 'dark',
           hideDownloadButton: false,
           showSidebar: true,
         }}

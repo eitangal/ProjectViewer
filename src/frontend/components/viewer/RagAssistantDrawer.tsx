@@ -10,7 +10,6 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
     navigateToFile,
     previewGroupId,
     direction,
-    contentWidth,
     isSidebarOpen,
     aiDrawerWidth,
     setAiDrawerWidth,
@@ -377,11 +376,7 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
 
         {/* Messages Scroll Area */}
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 text-xs">
-          <div
-            className={`w-full flex flex-col gap-4 ${
-              contentWidth === 'full' ? '' : 'max-w-4xl mx-auto'
-            }`}
-          >
+          <div className="w-full flex flex-col gap-4">
             {messages.map((m, idx) => (
               <div
                 key={idx}
@@ -440,11 +435,7 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
 
         {/* Input Composer */}
         <div className="p-3 border-t border-slate-800 bg-slate-950 shrink-0">
-          <div
-            className={`w-full ${
-              contentWidth === 'full' ? '' : 'max-w-4xl mx-auto'
-            }`}
-          >
+          <div className="w-full">
             <div className="relative flex items-end bg-slate-900 border border-slate-800 rounded-xl p-1.5 focus-within:border-indigo-500 transition-colors">
               <textarea
                 rows={2}

@@ -3,6 +3,23 @@ import { persist } from 'zustand/middleware';
 
 export type TextDirection = 'ltr' | 'rtl';
 export type ViewMode = 'formatted' | 'raw';
+export type Theme = 'dark' | 'light';
+
+export function applyThemeToDom(theme: Theme) {
+  if (typeof document !== 'undefined') {
+    if (theme === 'light') {
+      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark');
+      document.documentElement.setAttribute('data-theme', 'light');
+      document.documentElement.style.colorScheme = 'light';
+    } else {
+      document.documentElement.classList.add('dark');
+      document.documentElement.classList.remove('light');
+      document.documentElement.setAttribute('data-theme', 'dark');
+      document.documentElement.style.colorScheme = 'dark';
+    }
+  }
+}
 
 interface ViewerState {
   // Layout & UI Toggles
@@ -10,7 +27,7 @@ interface ViewerState {
   isAiDrawerOpen: boolean;
   direction: TextDirection;
   viewMode: ViewMode;
-  contentWidth: 'full' | 'centered';
+  theme: Theme;
   aiDrawerWidth: number;
   isAiDrawerMaximized: boolean;
 
@@ -26,7 +43,8 @@ interface ViewerState {
   toggleAiDrawer: () => void;
   setDirection: (dir: TextDirection) => void;
   setViewMode: (mode: ViewMode) => void;
-  toggleContentWidth: () => void;
+  setTheme: (theme: Theme) => void;
+  toggleTheme: () => void;
   setAiDrawerWidth: (width: number) => void;
   setAiDrawerMaximized: (maximized: boolean) => void;
   toggleAiDrawerMaximized: () => void;
@@ -43,7 +61,7 @@ export const useViewerStore = create<ViewerState>()(
       isAiDrawerOpen: false,
       direction: 'ltr',
       viewMode: 'formatted',
-      contentWidth: 'full',
+      theme: 'dark',
       aiDrawerWidth: 384,
       isAiDrawerMaximized: false,
       projectId: '',
@@ -56,8 +74,14 @@ export const useViewerStore = create<ViewerState>()(
       toggleAiDrawer: () => set((s) => ({ isAiDrawerOpen: !s.isAiDrawerOpen })),
       setDirection: (direction) => set({ direction }),
       setViewMode: (viewMode) => set({ viewMode }),
-      toggleContentWidth: () =>
-        set((s) => ({ contentWidth: s.contentWidth === 'full' ? 'centered' : 'full' })),
+      setTheme: (theme: Theme) => {
+        applyThemeToDom(theme);
+        set({ theme });
+      },
+      toggleTheme: () => {
+        const next = get().theme === 'dark' ? 'light' : 'dark';
+        get().setTheme(next);
+      },
       setAiDrawerWidth: (aiDrawerWidth) => set({ aiDrawerWidth }),
       setAiDrawerMaximized: (isAiDrawerMaximized) => set({ isAiDrawerMaximized }),
       toggleAiDrawerMaximized: () =>
@@ -118,7 +142,13 @@ export const useViewerStore = create<ViewerState>()(
         viewMode: state.viewMode,
         aiDrawerWidth: state.aiDrawerWidth,
         isAiDrawerMaximized: state.isAiDrawerMaximized,
+        theme: state.theme,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state?.theme) {
+          applyThemeToDom(state.theme);
+        }
+      },
     }
   )
 );

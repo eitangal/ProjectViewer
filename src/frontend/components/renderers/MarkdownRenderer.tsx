@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { SmartMarkdownLink } from './SmartMarkdownLink.js';
 import { MermaidBlock } from './MermaidBlock.js';
+import { useViewerStore } from '../../store/useViewerStore.js';
 
 // Relax sanitize schema to permit custom classes, ids for anchors, and SVG/Mermaid containers
 const sanitizeSchema = {
@@ -16,8 +17,9 @@ const sanitizeSchema = {
 };
 
 export const MarkdownRenderer: React.FC<{ markdown: string }> = ({ markdown }) => {
+  const { theme } = useViewerStore();
   return (
-    <div className="prose prose-invert prose-indigo max-w-none text-slate-200">
+    <div className={`prose ${theme === 'dark' ? 'prose-invert text-slate-200' : 'text-slate-800'} prose-indigo max-w-none`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}

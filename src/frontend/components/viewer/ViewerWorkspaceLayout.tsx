@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, Sparkles, Code, FileText, Globe, AlertTriangle, Maximize2, Minimize2 } from 'lucide-react';
+import { Menu, Sparkles, Code, FileText, AlertTriangle } from 'lucide-react';
 import { useViewerStore } from '../../store/useViewerStore.js';
+import { ThemeAndUserControls } from '../common/ThemeAndUserControls.js';
 
 interface ToastMessage {
   id: string;
@@ -11,8 +12,16 @@ interface ToastMessage {
 export const ViewerWorkspaceLayout: React.FC<{
   projectName?: string;
   isAiEnabled?: boolean;
+  user?: { email: string; role?: string; globalRole?: string } | null;
+  onLogout?: () => void;
   children: React.ReactNode;
-}> = ({ projectName = 'Project Portal', isAiEnabled = true, children }) => {
+}> = ({
+  projectName = 'Project Portal',
+  isAiEnabled = true,
+  user,
+  onLogout,
+  children,
+}) => {
   const {
     direction,
     setDirection,
@@ -23,8 +32,6 @@ export const ViewerWorkspaceLayout: React.FC<{
     isAiDrawerMaximized,
     viewMode,
     setViewMode,
-    contentWidth,
-    toggleContentWidth,
     activeFilePath,
   } = useViewerStore();
 
@@ -60,7 +67,7 @@ export const ViewerWorkspaceLayout: React.FC<{
             onClick={toggleSidebar}
             aria-label="Toggle File Tree"
             className={`p-2 rounded-xl transition-colors ${
-              isSidebarOpen ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+              isSidebarOpen ? 'bg-slate-800 text-slate-100 font-medium' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
             }`}
           >
             <Menu size={18} />
@@ -93,7 +100,7 @@ export const ViewerWorkspaceLayout: React.FC<{
         </div>
 
         {/* Right Toolbar Controls */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-center gap-2 md:gap-2.5 shrink-0">
           {/* Formatted vs Raw Segmented Control */}
           <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
             <button
@@ -121,12 +128,12 @@ export const ViewerWorkspaceLayout: React.FC<{
           </div>
 
           {/* Bi-Directional (LTR / RTL) Switcher */}
-          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-mono">
+          <div className="hidden sm:flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-mono">
             <button
               onClick={() => setDirection('ltr')}
               className={`px-2 py-1 rounded-lg transition-all ${
                 direction === 'ltr'
-                  ? 'bg-slate-800 text-white font-medium'
+                  ? 'bg-slate-800 text-slate-100 font-medium'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -136,29 +143,13 @@ export const ViewerWorkspaceLayout: React.FC<{
               onClick={() => setDirection('rtl')}
               className={`px-2 py-1 rounded-lg transition-all ${
                 direction === 'rtl'
-                  ? 'bg-slate-800 text-white font-medium'
+                  ? 'bg-slate-800 text-slate-100 font-medium'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               RTL
             </button>
           </div>
-
-          {/* Full Width vs Centered Workarea Toggle */}
-          <button
-            onClick={toggleContentWidth}
-            title={contentWidth === 'full' ? 'Switch to Centered Reading Width' : 'Switch to Full Workarea (100%)'}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs transition-colors ${
-              contentWidth === 'full'
-                ? 'bg-slate-800 text-indigo-300 border-indigo-700/60 font-medium'
-                : 'bg-slate-950 text-slate-400 hover:text-slate-200 border-slate-800'
-            }`}
-          >
-            {contentWidth === 'full' ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-            <span className="hidden lg:inline">
-              {contentWidth === 'full' ? 'Full Workarea' : 'Centered'}
-            </span>
-          </button>
 
           {/* AI Drawer Toggle */}
           {isAiEnabled && (
@@ -179,9 +170,20 @@ export const ViewerWorkspaceLayout: React.FC<{
               }`}
             >
               <Sparkles size={14} />
-              <span>AI Chat</span>
+              <span className="hidden md:inline">AI Chat</span>
             </button>
           )}
+
+          <div className="h-4 w-px bg-slate-800 mx-0.5 hidden sm:block" />
+
+          {/* Theme Toggle, User Display & Logout */}
+          <ThemeAndUserControls
+            user={user}
+            onLogout={onLogout}
+            showUser={true}
+            showTheme={true}
+            showLogout={true}
+          />
         </div>
       </header>
 

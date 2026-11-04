@@ -263,6 +263,7 @@ export function MainApp() {
             refetchPublishers();
           }}
           onLogout={handleLogout}
+          user={user}
         />
       </div>
     );
@@ -390,6 +391,7 @@ export function MainApp() {
           setCurrentView('viewer');
         }}
         onLogout={handleLogout}
+        user={user}
       />
     );
   }
@@ -437,6 +439,8 @@ export function MainApp() {
       <ViewerWorkspaceLayout
         projectName={treeData?.projectName || activeProject?.name || 'Project Portal'}
         isAiEnabled={treeData?.aiEnabled ?? false}
+        user={user}
+        onLogout={handleLogout}
       >
         <CollapsibleFileSidebar
           tree={treeData?.tree || []}

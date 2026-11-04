@@ -6,7 +6,6 @@ import {
   Sparkles,
   Eye,
   Plus,
-  LogOut,
   FolderGit2,
 } from 'lucide-react';
 import { ProjectSummary, ViewerGroupSummary, ViewerMembershipSummary } from '@/shared/types.js';
@@ -14,6 +13,7 @@ import { SyncAndRepoTab } from './SyncAndRepoTab.js';
 import { AclRuleBuilderWorkspace } from './AclRuleBuilderWorkspace.js';
 import { ViewerInvitationsTab } from './ViewerInvitationsTab.js';
 import { AiSettingsTab } from './AiSettingsTab.js';
+import { ThemeAndUserControls } from '../common/ThemeAndUserControls.js';
 
 export const PublisherConsoleLayout: React.FC<{
   projects: ProjectSummary[];
@@ -33,6 +33,7 @@ export const PublisherConsoleLayout: React.FC<{
   onTestKey: (apiKey: string) => Promise<boolean>;
   onOpenViewer: (projectId: string, previewGroupId?: string | null) => void;
   onLogout: () => void;
+  user?: { email: string; role?: string; globalRole?: string } | null;
 }> = ({
   projects,
   activeProject,
@@ -51,6 +52,7 @@ export const PublisherConsoleLayout: React.FC<{
   onTestKey,
   onOpenViewer,
   onLogout,
+  user,
 }) => {
   const [activeTab, setActiveTab] = useState<'sync' | 'acl' | 'viewers' | 'ai'>('sync');
   const [selectedPreviewGroupId, setSelectedPreviewGroupId] = useState<string>('');
@@ -136,13 +138,13 @@ export const PublisherConsoleLayout: React.FC<{
             </div>
           )}
 
-          <button
-            onClick={onLogout}
-            title="Sign Out"
-            className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors"
-          >
-            <LogOut size={16} />
-          </button>
+          <ThemeAndUserControls
+            user={user}
+            onLogout={onLogout}
+            showUser={true}
+            showTheme={true}
+            showLogout={true}
+          />
         </div>
       </header>
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mail, KeyRound, ArrowRight, ShieldCheck, Loader2 } from 'lucide-react';
+import { ThemeAndUserControls } from '../common/ThemeAndUserControls.js';
 
 export const LoginView: React.FC<{
   onLoginSuccess: (user: any, redirectProjectId: string | null) => void;
@@ -127,7 +128,10 @@ export const LoginView: React.FC<{
   };
 
   return (
-    <div className="min-h-screen w-screen flex items-center justify-center p-4 bg-slate-950 text-slate-100">
+    <div className="min-h-screen w-screen flex items-center justify-center p-4 bg-slate-950 text-slate-100 relative">
+      <div className="absolute top-4 end-4">
+        <ThemeAndUserControls showUser={false} showLogout={false} showTheme={true} />
+      </div>
       <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl flex flex-col gap-6">
         <div className="flex flex-col items-center text-center gap-2">
           <div className="p-3 bg-indigo-950/60 border border-indigo-800/80 rounded-2xl text-indigo-400 mb-1">
