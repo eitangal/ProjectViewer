@@ -1,0 +1,45 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - DATA_DIR=/var/lib/gitportal/data
+      - MASTER_ENCRYPTION_KEY=${MASTER_ENCRYPTION_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - SYSADMIN_BOOTSTRAP_EMAIL=${SYSADMIN_BOOTSTRAP_EMAIL:-admin@gitlens-portal.local}
+      - PORTAL_BASE_URL=${PORTAL_BASE_URL:-http://localhost}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+    volumes:
+      - portal_data:/var/lib/gitportal/data
+    networks:
+      - portal_net
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - portal_net
+    depends_on:
+      - app
+
+volumes:
+  portal_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  portal_net:
+    driver: bridge

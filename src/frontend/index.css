@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: #020617; /* slate-950 */
+    color: #f8fafc; /* slate-50 */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Ensure code blocks and mermaid SVGs strictly enforce LTR and monospace */
+pre, code, [dir="ltr"] {
+  direction: ltr !important;
+  text-align: left !important;
+}
+
+/* Logical property transitions */
+aside {
+  transition: width 0.2s ease-in-out;
+}
