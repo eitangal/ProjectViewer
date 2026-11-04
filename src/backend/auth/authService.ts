@@ -214,7 +214,9 @@ export class AuthService {
   /**
    * Any Invited User: Request a fresh OTP / Magic Link to sign in
    */
-  public async requestLoginChallenge(rawEmail: string): Promise<void> {
+  public async requestLoginChallenge(
+    rawEmail: string
+  ): Promise<{ magicToken: string; otpCode: string } | undefined> {
     const email = rawEmail.trim().toLowerCase();
     const user = this.db
       .prepare(`SELECT id, status FROM users WHERE email = ?`)
@@ -223,7 +225,7 @@ export class AuthService {
     // Silent return if email is not registered/invited (prevents user enumeration)
     if (!user || user.status === 'SUSPENDED') return;
 
-    await this.issueChallengeAndSendEmail(
+    return await this.issueChallengeAndSendEmail(
       email,
       'LOGIN',
       null,
@@ -326,7 +328,7 @@ export class AuthService {
     purpose: string,
     projectId: string | null,
     subject: string
-  ): Promise<void> {
+  ): Promise<{ magicToken: string; otpCode: string }> {
     const { rawMagicToken, rawOtp, tokenHash, otpHash } =
       generateVerificationChallenge(email);
 
@@ -357,5 +359,7 @@ export class AuthService {
       otpCode: rawOtp,
       contextLabel: subject,
     });
+
+    return { magicToken: rawMagicToken, otpCode: rawOtp };
   }
 }

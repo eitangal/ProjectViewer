@@ -10,6 +10,7 @@ export const LoginView: React.FC<{
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [devOtp, setDevOtp] = useState<string | null>(null);
 
   // Check for 1-click magic link query param token on page load
   useEffect(() => {
@@ -56,7 +57,13 @@ export const LoginView: React.FC<{
       if (!res.ok) throw new Error(data.error || 'Request failed');
 
       setStep('otp');
-      setInfoMessage('If your email is registered or invited, a verification challenge has been sent.');
+      if (data.devOtp) {
+        setDevOtp(data.devOtp);
+        setOtpCode(data.devOtp); // auto-fill OTP in development
+        setInfoMessage(`[Development Mode] Verification code: ${data.devOtp} (auto-filled)`);
+      } else {
+        setInfoMessage('If your email is registered or invited, a verification challenge has been sent.');
+      }
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to request verification code');
     } finally {

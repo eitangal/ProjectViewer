@@ -13,8 +13,14 @@ export async function registerAuthRoutes(
     if (!email) {
       return reply.code(400).send({ error: 'Email is required' });
     }
-    await authService.requestLoginChallenge(email);
-    return reply.send({ message: 'If your email is registered, a code has been sent.' });
+    const challenge = await authService.requestLoginChallenge(email);
+    const isDev = !process.env.SMTP_HOST || process.env.NODE_ENV !== 'production';
+
+    return reply.send({
+      message: 'If your email is registered, a code has been sent.',
+      devOtp: isDev && challenge ? challenge.otpCode : undefined,
+      devMagicToken: isDev && challenge ? challenge.magicToken : undefined,
+    });
   });
 
   // 2. Verify Magic Link or 6-Digit OTP and set HttpOnly Session Cookie
