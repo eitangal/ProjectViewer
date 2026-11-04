@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify';
 import Database from 'better-sqlite3';
 import { AuthService } from '../auth/authService.js';
 import { buildAuthMiddlewares } from '../auth/authMiddleware.js';
-import { PortalMailer, SmtpConfig } from '../auth/mailer.js';
+import { PortalMailer, SmtpConfig, BrevoApiConfig, parseSender } from '../auth/mailer.js';
 
 export async function registerAdminRoutes(
   app: FastifyInstance,
@@ -145,80 +145,103 @@ export async function registerAdminRoutes(
     return reply.send({ ok: true });
   });
 
-  // 6. SMTP Management & Verification
-  app.get('/api/admin/smtp', adminGuard, async (req, reply) => {
-    const config = mailer?.getSmtpConfig();
+  // 6. Brevo Transactional Email REST API Configuration & Verification
+  const handleGetEmailConfig = async (req: any, reply: any) => {
+    const config = mailer?.getBrevoConfig();
     return reply.send({
       isConfigured: !!config,
+      provider: 'brevo_api',
       config: config
         ? {
-            host: config.host,
-            port: config.port,
-            secure: config.secure,
-            user: config.user,
-            pass: config.pass ? '••••••••' : '',
-            from: config.from,
+            apiKey: config.apiKey ? '••••••••' : '',
+            senderEmail: config.senderEmail,
+            senderName: config.senderName,
+            // Backwards-compatible fields
+            host: 'api.brevo.com (HTTPS REST API)',
+            port: 443,
+            secure: true,
+            user: config.senderName,
+            pass: config.apiKey ? '••••••••' : '',
+            from: `${config.senderName} <${config.senderEmail}>`,
           }
         : null,
     });
-  });
+  };
 
-  app.put('/api/admin/smtp', adminGuard, async (req, reply) => {
-    const { host, port, secure, user, pass, from } = req.body as SmtpConfig;
-    if (!host) {
-      return reply.code(400).send({ error: 'SMTP host is required' });
+  const handleSaveEmailConfig = async (req: any, reply: any) => {
+    const body = req.body as any;
+    const apiKey = body.apiKey || body.pass;
+    const senderEmail = body.senderEmail || body.from;
+    const senderName = body.senderName;
+
+    if (!apiKey && apiKey !== '••••••••') {
+      return reply.code(400).send({ error: 'Brevo API key is required' });
     }
 
-    const current = mailer?.getSmtpConfig();
-    const finalPass = pass === '••••••••' || pass === undefined ? (current?.pass || '') : pass;
+    const current = mailer?.getBrevoConfig();
+    const finalKey = apiKey === '••••••••' || apiKey === undefined ? (current?.apiKey || '') : apiKey;
 
-    const newConfig: SmtpConfig = {
-      host: host.trim(),
-      port: Number(port) || 587,
-      secure: Boolean(secure),
-      user: (user || '').trim(),
-      pass: finalPass,
-      from: (from || 'noreply@gitlens-portal.local').trim(),
+    if (!finalKey) {
+      return reply.code(400).send({ error: 'Brevo API key is required' });
+    }
+
+    const parsed = parseSender(senderEmail || '');
+    const newConfig: BrevoApiConfig = {
+      apiKey: finalKey.trim(),
+      senderEmail: (senderEmail && !senderEmail.includes('<') ? senderEmail : parsed.email) || current?.senderEmail || 'noreply@gitlens-portal.local',
+      senderName: (senderName || parsed.name || current?.senderName || 'GitLens Portal').trim(),
     };
 
     db.prepare(`
       INSERT INTO system_settings (key, value_json, updated_at)
-      VALUES ('smtp_config', ?, ?)
+      VALUES ('brevo_config', ?, ?)
       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
     `).run(JSON.stringify(newConfig), Date.now());
 
-    mailer?.reloadTransporter();
+    return reply.send({ ok: true, isConfigured: true, config: { ...newConfig, apiKey: '••••••••' } });
+  };
 
-    return reply.send({ ok: true, isConfigured: true });
-  });
-
-  app.post('/api/admin/smtp/test', adminGuard, async (req, reply) => {
-    const { host, port, secure, user, pass, from, testEmail } = req.body as SmtpConfig & { testEmail: string };
-    if (!host || !testEmail) {
-      return reply.code(400).send({ error: 'SMTP host and test recipient email are required' });
+  const handleTestEmailConfig = async (req: any, reply: any) => {
+    const body = req.body as any;
+    const testEmail = body.testEmail;
+    if (!testEmail || !testEmail.trim()) {
+      return reply.code(400).send({ error: 'Test recipient email is required' });
     }
 
-    const current = mailer?.getSmtpConfig();
-    const finalPass = pass === '••••••••' || pass === undefined ? (current?.pass || '') : pass;
+    const current = mailer?.getBrevoConfig();
+    const apiKey = body.apiKey || body.pass;
+    const finalKey = apiKey === '••••••••' || !apiKey ? (current?.apiKey || '') : apiKey;
 
-    const testConfig: SmtpConfig = {
-      host: host.trim(),
-      port: Number(port) || 587,
-      secure: Boolean(secure),
-      user: (user || '').trim(),
-      pass: finalPass,
-      from: (from || 'noreply@gitlens-portal.local').trim(),
+    if (!finalKey) {
+      return reply.code(400).send({ error: 'Brevo API key is required' });
+    }
+
+    const senderEmail = body.senderEmail || body.from;
+    const parsed = parseSender(senderEmail || '');
+    const testConfig: BrevoApiConfig = {
+      apiKey: finalKey.trim(),
+      senderEmail: (senderEmail && !senderEmail.includes('<') ? senderEmail : parsed.email) || current?.senderEmail || '',
+      senderName: (body.senderName || parsed.name || current?.senderName || 'GitLens Portal').trim(),
     };
 
     if (!mailer) {
       return reply.code(500).send({ error: 'Mailer service unavailable' });
     }
 
-    const result = await mailer.testSmtpConnection(testConfig, testEmail.trim());
+    const result = await mailer.testBrevoConnection(testConfig, testEmail.trim());
     if (!result.success) {
-      return reply.code(400).send({ error: result.error || 'SMTP test failed' });
+      return reply.code(400).send({ error: result.error || 'Brevo API test failed' });
     }
 
-    return reply.send({ ok: true, message: `Test email successfully dispatched to ${testEmail}` });
-  });
+    return reply.send({ ok: true, message: result.message || `Test email successfully dispatched to ${testEmail}` });
+  };
+
+  app.get('/api/admin/email', adminGuard, handleGetEmailConfig);
+  app.put('/api/admin/email', adminGuard, handleSaveEmailConfig);
+  app.post('/api/admin/email/test', adminGuard, handleTestEmailConfig);
+
+  // Backwards-compatible aliases
+  app.get('/api/admin/smtp', adminGuard, handleGetEmailConfig);
+  app.put('/api/admin/smtp', adminGuard, handleSaveEmailConfig);
+  app.post('/api/admin/smtp/test', adminGuard, handleTestEmailConfig);
 }

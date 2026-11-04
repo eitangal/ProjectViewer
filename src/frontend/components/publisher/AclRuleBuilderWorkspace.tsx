@@ -24,8 +24,10 @@ const DEFAULT_MOCK_FILES: RepoFileEntry[] = [
 export const AclRuleBuilderWorkspace: React.FC<{
   projectId: string;
   activeGroup: ViewerGroupSummary | null;
+  groups?: ViewerGroupSummary[];
+  onSelectGroup?: (id: string) => void;
   onSaveGroup: (group: Partial<ViewerGroupSummary>) => Promise<void>;
-}> = ({ projectId, activeGroup, onSaveGroup }) => {
+}> = ({ projectId, activeGroup, groups = [], onSelectGroup, onSaveGroup }) => {
   const [repoFiles, setRepoFiles] = useState<RepoFileEntry[]>(DEFAULT_MOCK_FILES);
   const [isUsingRealFiles, setIsUsingRealFiles] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -112,6 +114,7 @@ export const AclRuleBuilderWorkspace: React.FC<{
       const excludes = rule.excludeGlobs.split(',').map((g) => g.trim()).filter(Boolean);
 
       await onSaveGroup({
+        id: activeGroup?.id,
         allowedFolders: folders.length > 0 ? folders : ['*'],
         allowedExtensions: exts,
         excludeGlobs: excludes,
@@ -142,6 +145,22 @@ export const AclRuleBuilderWorkspace: React.FC<{
               <span className="font-semibold text-slate-200">"{activeGroup?.name || 'Default'}"</span>.
             </p>
           </div>
+          {groups.length > 1 && onSelectGroup && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-slate-400">Group:</span>
+              <select
+                value={activeGroup?.id || ''}
+                onChange={(e) => onSelectGroup(e.target.value)}
+                className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1 text-xs text-slate-200 font-medium focus:outline-none focus:border-indigo-500"
+              >
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col gap-1.5">

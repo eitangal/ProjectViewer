@@ -34,6 +34,11 @@ export const CollapsibleFileSidebar: React.FC<{
     return new Set(tree.filter((n) => n.type === 'directory').map((n) => n.path));
   });
 
+  // Re-expand folders when authorization or tree changes
+  React.useEffect(() => {
+    setExpandedFolders(new Set(tree.filter((n) => n.type === 'directory').map((n) => n.path)));
+  }, [tree]);
+
   const toggleFolder = (folderPath: string) => {
     setExpandedFolders((prev) => {
       const next = new Set(prev);

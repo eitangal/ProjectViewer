@@ -20,7 +20,8 @@ export interface VerifyResult {
 }
 
 export class AuthService {
-  private readonly CHALLENGE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+  private readonly CHALLENGE_TTL_MS = 15 * 60 * 1000; // 15 minutes for interactive login OTP
+  private readonly INVITATION_TTL_MS = 48 * 60 * 60 * 1000; // 48 hours for publisher/viewer invitations
   private readonly MAX_OTP_ATTEMPTS = 5;
 
   constructor(
@@ -39,14 +40,20 @@ export class AuthService {
    * Seeds the root SysAdmin account on server startup if not already seeded
    */
   public bootstrapSysAdmin(sysAdminEmail: string): void {
-    const email = sysAdminEmail.trim().toLowerCase();
-    this.db
-      .prepare(`
-        INSERT INTO users (id, email, global_role, status, max_repos, max_disk_quota_bytes, max_viewers, created_at)
-        VALUES (?, ?, 'SYSADMIN', 'ACTIVE', 9999, 107374182400, 99999, ?)
-        ON CONFLICT(email) DO UPDATE SET global_role = 'SYSADMIN', status = 'ACTIVE'
-      `)
-      .run(randomUUID(), email, Date.now());
+    const emails = sysAdminEmail
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => e.length > 0);
+
+    for (const email of emails) {
+      this.db
+        .prepare(`
+          INSERT INTO users (id, email, global_role, status, max_repos, max_disk_quota_bytes, max_viewers, created_at)
+          VALUES (?, ?, 'SYSADMIN', 'ACTIVE', 9999, 107374182400, 99999, ?)
+          ON CONFLICT(email) DO UPDATE SET global_role = 'SYSADMIN', status = 'ACTIVE'
+        `)
+        .run(randomUUID(), email, Date.now());
+    }
   }
 
   /**
@@ -105,7 +112,9 @@ export class AuthService {
       email,
       'INVITE_PUBLISHER',
       null,
-      'You have been invited as a Project Publisher'
+      'You have been invited as a Project Publisher',
+      this.INVITATION_TTL_MS,
+      '48 hours'
     );
 
     return {
@@ -205,7 +214,9 @@ export class AuthService {
       email,
       'INVITE_VIEWER',
       params.projectId,
-      `You have been invited to view project "${project.name}"`
+      `You have been invited to view project "${project.name}"`,
+      this.INVITATION_TTL_MS,
+      '48 hours'
     );
 
     return {
@@ -263,7 +274,9 @@ export class AuthService {
       email,
       'LOGIN',
       null,
-      'Your sign-in verification code'
+      'Your sign-in verification code',
+      this.CHALLENGE_TTL_MS,
+      '15 minutes'
     );
   }
 
@@ -277,7 +290,7 @@ export class AuthService {
     let challenge: any;
 
     if ('magicToken' in input && input.magicToken) {
-      const tokenHash = sha256Hex(input.magicToken);
+      const tokenHash = sha256Hex(input.magicToken.trim());
       challenge = this.db
         .prepare(`
           SELECT * FROM auth_challenges
@@ -285,37 +298,86 @@ export class AuthService {
         `)
         .get(tokenHash, now);
 
-      if (!challenge) throw new Error('Invalid or expired magic link.');
-    } else if ('email' in input && 'otpCode' in input) {
-      const email = input.email.trim().toLowerCase();
-      challenge = this.db
-        .prepare(`
-          SELECT * FROM auth_challenges
-          WHERE email = ? AND consumed_at IS NULL AND expires_at > ?
-          ORDER BY expires_at DESC LIMIT 1
-        `)
-        .get(email, now);
+      if (!challenge) {
+        const existing = this.db
+          .prepare(`SELECT consumed_at FROM auth_challenges WHERE token_hash = ?`)
+          .get(tokenHash) as { consumed_at?: number } | undefined;
 
-      if (!challenge || challenge.attempts >= this.MAX_OTP_ATTEMPTS) {
-        throw new Error('Verification code expired or maximum attempts exceeded.');
+        if (existing?.consumed_at) {
+          throw new Error('This magic link has already been used. Please enter your email to request a new code.');
+        }
+        throw new Error('Invalid or expired magic link.');
+      }
+    } else if ('email' in input && 'otpCode' in input) {
+      const email = (input.email || '').trim().toLowerCase();
+      const enteredOtp = (input.otpCode || '').trim();
+
+      if (!email || !enteredOtp) {
+        throw new Error('Email and verification code are required.');
       }
 
-      const expectedOtpHash = sha256Hex(`${email}:${input.otpCode.trim()}`);
-      if (!safeCompareHex(challenge.otp_hash, expectedOtpHash)) {
-        this.db
-          .prepare(`UPDATE auth_challenges SET attempts = attempts + 1 WHERE id = ?`)
-          .run(challenge.id);
-        throw new Error('Incorrect verification code.');
+      const expectedOtpHash = sha256Hex(`${email}:${enteredOtp}`);
+
+      // 1. Look for any active, unconsumed, unexpired challenge matching the entered OTP
+      const matchingChallenge = this.db
+        .prepare(`
+          SELECT * FROM auth_challenges
+          WHERE email = ? AND consumed_at IS NULL AND expires_at > ? AND otp_hash = ?
+          ORDER BY expires_at DESC LIMIT 1
+        `)
+        .get(email, now, expectedOtpHash) as any;
+
+      if (matchingChallenge) {
+        if (matchingChallenge.attempts >= this.MAX_OTP_ATTEMPTS) {
+          throw new Error('Verification code expired or maximum attempts exceeded.');
+        }
+        challenge = matchingChallenge;
+      } else {
+        // No matching active challenge found. Find the most recent active challenge to record the attempt
+        const latestActive = this.db
+          .prepare(`
+            SELECT * FROM auth_challenges
+            WHERE email = ? AND consumed_at IS NULL AND expires_at > ?
+            ORDER BY expires_at DESC LIMIT 1
+          `)
+          .get(email, now) as any;
+
+        if (latestActive) {
+          this.db
+            .prepare(`UPDATE auth_challenges SET attempts = attempts + 1 WHERE id = ?`)
+            .run(latestActive.id);
+
+          if (latestActive.attempts + 1 >= this.MAX_OTP_ATTEMPTS) {
+            throw new Error('Verification code expired or maximum attempts exceeded.');
+          }
+          throw new Error('Incorrect verification code.');
+        }
+
+        // Check if any challenge exists for this email (to distinguish expired from non-existent)
+        const anyChallenge = this.db
+          .prepare(`SELECT * FROM auth_challenges WHERE email = ? ORDER BY expires_at DESC LIMIT 1`)
+          .get(email) as any;
+
+        if (anyChallenge) {
+          throw new Error('Verification code expired or maximum attempts exceeded.');
+        }
+
+        throw new Error('No active verification challenge found for this email. Please request a new code.');
       }
     } else {
       throw new Error('Missing verification credentials.');
     }
 
-    // Atomically consume challenge and mark user as ACTIVE
+    // Atomically consume challenge, retire any other pending challenges for this email, and mark user as ACTIVE
     const user = this.db.transaction(() => {
       this.db
         .prepare(`UPDATE auth_challenges SET consumed_at = ? WHERE id = ?`)
         .run(now, challenge.id);
+
+      // Retire any sibling pending challenges for this user upon successful authentication
+      this.db
+        .prepare(`UPDATE auth_challenges SET consumed_at = ? WHERE email = ? AND consumed_at IS NULL`)
+        .run(now, challenge.email);
 
       this.db
         .prepare(`
@@ -361,7 +423,9 @@ export class AuthService {
     email: string,
     purpose: string,
     projectId: string | null,
-    subject: string
+    subject: string,
+    ttlMs: number = this.CHALLENGE_TTL_MS,
+    expiryLabel: string = '15 minutes'
   ): Promise<{
     magicToken: string;
     otpCode: string;
@@ -385,7 +449,7 @@ export class AuthService {
         otpHash,
         purpose,
         projectId,
-        Date.now() + this.CHALLENGE_TTL_MS
+        Date.now() + ttlMs
       );
 
     const magicLinkUrl = `${this.portalBaseUrl}/auth/verify?token=${encodeURIComponent(
@@ -398,6 +462,7 @@ export class AuthService {
       magicLinkUrl,
       otpCode: rawOtp,
       contextLabel: subject,
+      expiryLabel,
     });
 
     return {

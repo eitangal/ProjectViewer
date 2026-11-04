@@ -15,9 +15,19 @@ export const DocumentViewport: React.FC<{
   errorMessage?: string | null;
   projectId?: string;
 }> = ({ content, isLoading, isRestricted = false, errorMessage = null, projectId }) => {
-  const { activeFilePath, activeHash, viewMode, contentWidth, projectId: storeProjectId } = useViewerStore();
+  const {
+    activeFilePath,
+    activeHash,
+    viewMode,
+    contentWidth,
+    projectId: storeProjectId,
+    isAiDrawerOpen,
+    isAiDrawerMaximized,
+  } = useViewerStore();
   const viewportRef = useRef<HTMLDivElement>(null);
   const effectiveProjectId = projectId || storeProjectId;
+  const isHidden = isAiDrawerOpen && isAiDrawerMaximized;
+  const hiddenClass = isHidden ? 'hidden' : '';
 
   // Handle anchor scrolling after document renders
   useEffect(() => {
@@ -31,7 +41,7 @@ export const DocumentViewport: React.FC<{
 
   if (isLoading) {
     return (
-      <main className="flex-1 flex items-center justify-center p-8 bg-slate-950">
+      <main className={`flex-1 min-w-0 flex items-center justify-center p-8 bg-slate-950 ${hiddenClass}`}>
         <div className="flex flex-col items-center gap-3 text-slate-500">
           <Loader2 size={28} className="animate-spin text-indigo-500" />
           <span className="text-xs">Loading document...</span>
@@ -42,7 +52,7 @@ export const DocumentViewport: React.FC<{
 
   if (isRestricted) {
     return (
-      <main className="flex-1 flex items-center justify-center p-8 bg-slate-950">
+      <main className={`flex-1 min-w-0 flex items-center justify-center p-8 bg-slate-950 ${hiddenClass}`}>
         <div className="max-w-md p-8 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col items-center text-center shadow-xl">
           <div className="p-3 bg-amber-950/40 border border-amber-800/80 rounded-2xl text-amber-400 mb-4">
             <Lock size={28} />
@@ -61,7 +71,7 @@ export const DocumentViewport: React.FC<{
 
   if (errorMessage) {
     return (
-      <main className="flex-1 flex items-center justify-center p-8 bg-slate-950">
+      <main className={`flex-1 min-w-0 flex items-center justify-center p-8 bg-slate-950 ${hiddenClass}`}>
         <div className="max-w-md p-8 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col items-center text-center shadow-xl">
           <div className="p-3 bg-rose-950/40 border border-rose-800/80 rounded-2xl text-rose-400 mb-4">
             <FileQuestion size={28} />
@@ -75,7 +85,7 @@ export const DocumentViewport: React.FC<{
 
   if (!activeFilePath || content === null) {
     return (
-      <main className="flex-1 flex items-center justify-center p-8 bg-slate-950 text-slate-500">
+      <main className={`flex-1 min-w-0 flex items-center justify-center p-8 bg-slate-950 text-slate-500 ${hiddenClass}`}>
         <div className="flex flex-col items-center gap-2 max-w-sm text-center">
           <FileQuestion size={36} className="text-slate-700" />
           <p className="text-sm font-medium text-slate-400">No document selected</p>
@@ -92,7 +102,7 @@ export const DocumentViewport: React.FC<{
   // 1. Full-Bleed Interactive HTML Application (Full Workarea, with Scripts and Audio)
   if (format === 'html' && viewMode !== 'raw') {
     return (
-      <main ref={viewportRef} className="flex-1 h-full w-full overflow-hidden flex flex-col bg-slate-950">
+      <main ref={viewportRef} className={`flex-1 min-w-0 h-full w-full overflow-hidden flex flex-col bg-slate-950 ${hiddenClass}`}>
         <SandboxedHtmlRenderer
           htmlContent={content}
           filePath={activeFilePath}
@@ -105,7 +115,7 @@ export const DocumentViewport: React.FC<{
   // 2. Full-Bleed OpenAPI Reference View
   if (format === 'openapi' && viewMode !== 'raw') {
     return (
-      <main ref={viewportRef} className="flex-1 h-full w-full overflow-y-auto bg-slate-950 p-2 md:p-6">
+      <main ref={viewportRef} className={`flex-1 min-w-0 h-full w-full overflow-y-auto bg-slate-950 p-2 md:p-6 ${hiddenClass}`}>
         <OpenApiSpecRenderer rawSpec={content} />
       </main>
     );
@@ -115,7 +125,7 @@ export const DocumentViewport: React.FC<{
   return (
     <main
       ref={viewportRef}
-      className="flex-1 overflow-y-auto px-6 py-6 md:px-10 bg-slate-950 relative"
+      className={`flex-1 min-w-0 overflow-y-auto px-6 py-6 md:px-10 bg-slate-950 relative ${hiddenClass}`}
     >
       <div className={contentWidth === 'full' ? 'w-full min-h-full' : 'max-w-5xl mx-auto min-h-full'}>
         {viewMode === 'raw' ? (

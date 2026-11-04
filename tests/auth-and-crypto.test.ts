@@ -88,12 +88,17 @@ describe('3. Passwordless Invitation & Verification Service (authService.ts)', (
     authService = new AuthService(db, mailer, 'http://localhost:5173');
   });
 
-  it('bootstraps root SysAdmin account', () => {
-    authService.bootstrapSysAdmin('admin@gitlens-portal.local');
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get('admin@gitlens-portal.local') as any;
-    expect(user).toBeDefined();
-    expect(user.global_role).toBe('SYSADMIN');
-    expect(user.status).toBe('ACTIVE');
+  it('bootstraps root SysAdmin account (single or multiple comma-separated)', () => {
+    authService.bootstrapSysAdmin('admin@gitlens-portal.local, eitanga@gmail.com');
+    const user1 = db.prepare('SELECT * FROM users WHERE email = ?').get('admin@gitlens-portal.local') as any;
+    expect(user1).toBeDefined();
+    expect(user1.global_role).toBe('SYSADMIN');
+    expect(user1.status).toBe('ACTIVE');
+
+    const user2 = db.prepare('SELECT * FROM users WHERE email = ?').get('eitanga@gmail.com') as any;
+    expect(user2).toBeDefined();
+    expect(user2.global_role).toBe('SYSADMIN');
+    expect(user2.status).toBe('ACTIVE');
   });
 
   it('allows SysAdmin to invite a Publisher and verifies with OTP', async () => {
@@ -145,5 +150,61 @@ describe('3. Passwordless Invitation & Verification Service (authService.ts)', (
     await expect(
       authService.verifyChallenge({ email: targetEmail, otpCode: sentMail!.otpCode })
     ).rejects.toThrow(/expired or maximum attempts/i);
+  });
+
+  it('allows invited publisher to verify using original invite code even after requesting a fresh login code', async () => {
+    authService.bootstrapSysAdmin('admin@gitlens-portal.local');
+    const admin = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@gitlens-portal.local') as any;
+
+    const publisherEmail = 'freshpub@startup.io';
+    const inviteRes = await authService.invitePublisher(admin.id, publisherEmail);
+    const inviteOtp = inviteRes.otpCode;
+
+    // Simulate publisher visiting the login page and clicking "Send Verification Code",
+    // which issues a secondary login challenge
+    const loginChallenge = await authService.requestLoginChallenge(publisherEmail);
+    expect(loginChallenge).toBeDefined();
+    expect(loginChallenge?.otpCode).not.toBe(inviteOtp);
+
+    // Publisher enters the code from their original invitation email
+    const result = await authService.verifyChallenge({
+      email: `  ${publisherEmail.toUpperCase()}  `,
+      otpCode: inviteOtp,
+    });
+
+    expect(result.jwt).toBeTypeOf('string');
+    expect(result.user.globalRole).toBe('PUBLISHER');
+
+    // Sibling pending challenges for this email should be retired
+    const pendingChallenges = db
+      .prepare('SELECT COUNT(*) as count FROM auth_challenges WHERE email = ? AND consumed_at IS NULL')
+      .get(publisherEmail) as { count: number };
+    expect(pendingChallenges.count).toBe(0);
+  });
+
+  it('allows invited publisher to verify beyond 15 minutes due to extended invitation TTL', async () => {
+    authService.bootstrapSysAdmin('admin@gitlens-portal.local');
+    const admin = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@gitlens-portal.local') as any;
+
+    const publisherEmail = 'latepub@domain.com';
+    const inviteRes = await authService.invitePublisher(admin.id, publisherEmail);
+
+    // Simulate 30 minutes passing (older 15-minute TTL would have expired)
+    const thirtyMinutesMs = 30 * 60 * 1000;
+    const challengeRow = db
+      .prepare('SELECT expires_at FROM auth_challenges WHERE email = ? ORDER BY expires_at DESC LIMIT 1')
+      .get(publisherEmail) as { expires_at: number };
+
+    // Ensure the expiration is set to 48 hours (~172,800,000 ms), well past 30 minutes
+    const remainingMs = challengeRow.expires_at - Date.now();
+    expect(remainingMs).toBeGreaterThan(24 * 60 * 60 * 1000);
+
+    // Verifying now succeeds without expired error
+    const result = await authService.verifyChallenge({
+      email: publisherEmail,
+      otpCode: inviteRes.otpCode,
+    });
+
+    expect(result.user.globalRole).toBe('PUBLISHER');
   });
 });

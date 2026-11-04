@@ -24,11 +24,14 @@ export function isIndexableFile(filePath: string): boolean {
  * Splits a file into overlapping line-aware chunks (~1200 chars per chunk, 10 lines overlap)
  */
 export function chunkFileContent(filePath: string, rawText: string): DocumentChunk[] {
-  const lines = rawText.split(/\r?\n/);
+  // For oversized files (e.g. monolithic prototypes, minified bundles), cap input to prevent API stalls
+  const effectiveText = rawText.length > 150_000 ? rawText.slice(0, 150_000) : rawText;
+  const lines = effectiveText.split(/\r?\n/);
   const chunks: DocumentChunk[] = [];
 
   const MAX_CHARS = 1200;
   const OVERLAP_LINES = 10;
+  const MAX_CHUNKS_PER_FILE = 40;
 
   let startLine = 1;
   let currentLines: string[] = [];
@@ -52,6 +55,10 @@ export function chunkFileContent(filePath: string, rawText: string): DocumentChu
         content: `File: ${filePath} (Lines ${startLine}-${endLine})\n---\n${currentLines.join('\n')}`,
       });
 
+      if (chunks.length >= MAX_CHUNKS_PER_FILE) {
+        break;
+      }
+
       if (i < lines.length - 1) {
         const overlap = currentLines.slice(-OVERLAP_LINES);
         currentLines = [...overlap];
@@ -69,15 +76,25 @@ export class GeminiRagService {
    * Validates a Gemini API key by making a lightweight request
    */
   public async validateApiKey(apiKey: string): Promise<boolean> {
+    const ai = new GoogleGenAI({ apiKey });
     try {
-      const ai = new GoogleGenAI({ apiKey });
       const resp = await ai.models.embedContent({
-        model: 'text-embedding-004',
+        model: 'gemini-embedding-001',
         contents: 'test connection',
         config: { outputDimensionality: 768 },
       });
       return !!resp.embeddings?.[0]?.values?.length;
     } catch (err: any) {
+      // If embedding model fails, verify key validity with lightweight generation
+      try {
+        const respGen = await ai.models.generateContent({
+          model: 'gemini-3.5-flash-lite',
+          contents: 'ping',
+        });
+        if (respGen.text !== undefined) return true;
+      } catch {
+        // Fall through to throw original error
+      }
       throw new Error(`Invalid Gemini API key: ${err.message || 'Validation failed'}`);
     }
   }
@@ -88,29 +105,33 @@ export class GeminiRagService {
   public async embedChunks(
     decryptedGeminiKey: string,
     texts: string[],
-    model: string = 'text-embedding-004'
+    model: string = 'gemini-embedding-001'
   ): Promise<Float32Array[]> {
     const ai = new GoogleGenAI({ apiKey: decryptedGeminiKey });
-    const BATCH_SIZE = 50;
+    const CONCURRENCY = 5;
     const vectors: Float32Array[] = [];
 
-    for (let i = 0; i < texts.length; i += BATCH_SIZE) {
-      const batch = texts.slice(i, i + BATCH_SIZE);
+    // Fallback if legacy text-embedding-004 is configured
+    const effectiveModel = model === 'text-embedding-004' ? 'gemini-embedding-001' : model;
 
-      // Support batch contents or individual calls
-      for (const text of batch) {
-        const response = await ai.models.embedContent({
-          model,
-          contents: text,
-          config: { outputDimensionality: 768 },
-        });
+    for (let i = 0; i < texts.length; i += CONCURRENCY) {
+      const slice = texts.slice(i, i + CONCURRENCY);
+      const batchVectors = await Promise.all(
+        slice.map(async (text) => {
+          const response = await ai.models.embedContent({
+            model: effectiveModel,
+            contents: text,
+            config: { outputDimensionality: 768 },
+          });
 
-        const values = response.embeddings?.[0]?.values;
-        if (!values || values.length === 0) {
-          throw new Error('Gemini API returned empty embedding vector');
-        }
-        vectors.push(new Float32Array(values));
-      }
+          const values = response.embeddings?.[0]?.values;
+          if (!values || values.length === 0) {
+            throw new Error('Gemini API returned empty embedding vector');
+          }
+          return new Float32Array(values);
+        })
+      );
+      vectors.push(...batchVectors);
     }
     return vectors;
   }
@@ -127,7 +148,7 @@ export class GeminiRagService {
   }): AsyncGenerator<string> {
     const {
       decryptedGeminiKey,
-      model = 'gemini-2.5-flash',
+      model = 'gemini-3.8-flash',
       systemPrompt,
       userQuestion,
       retrievedChunks,

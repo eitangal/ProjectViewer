@@ -20,6 +20,7 @@ export const ViewerWorkspaceLayout: React.FC<{
     toggleSidebar,
     isAiDrawerOpen,
     toggleAiDrawer,
+    isAiDrawerMaximized,
     viewMode,
     setViewMode,
     contentWidth,
@@ -163,6 +164,14 @@ export const ViewerWorkspaceLayout: React.FC<{
           {isAiEnabled && (
             <button
               onClick={toggleAiDrawer}
+              title={
+                isAiDrawerOpen
+                  ? isAiDrawerMaximized
+                    ? 'Close AI Assistant (Full Workarea)'
+                    : 'Close AI Assistant'
+                  : 'Open AI Assistant'
+              }
+              aria-label="Toggle AI Assistant"
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
                 isAiDrawerOpen
                   ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30'

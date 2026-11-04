@@ -11,10 +11,9 @@ services:
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - SYSADMIN_BOOTSTRAP_EMAIL=${SYSADMIN_BOOTSTRAP_EMAIL:-admin@gitlens-portal.local}
       - PORTAL_BASE_URL=${PORTAL_BASE_URL:-http://localhost}
-      - SMTP_HOST=${SMTP_HOST}
-      - SMTP_PORT=${SMTP_PORT:-587}
-      - SMTP_USER=${SMTP_USER}
-      - SMTP_PASS=${SMTP_PASS}
+      - BREVO_API_KEY=${BREVO_API_KEY}
+      - BREVO_SENDER_EMAIL=${BREVO_SENDER_EMAIL}
+      - BREVO_SENDER_NAME=${BREVO_SENDER_NAME:-GitLens Portal}
     volumes:
       - portal_data:/var/lib/gitportal/data
     networks:

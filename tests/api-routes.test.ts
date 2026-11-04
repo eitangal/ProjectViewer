@@ -76,11 +76,15 @@ describe('End-to-End Fastify API Route Lifecycle (api-routes.test.ts)', () => {
   it('executes full multi-tenant flow: Admin -> Publisher -> Viewer with ACL gate', async () => {
     // 1. SysAdmin requests login code
     const adminEmail = 'root@gitlens-portal.local';
-    await app.inject({
+    const reqCodeRes = await app.inject({
       method: 'POST',
       url: '/api/auth/request-code',
       payload: { email: adminEmail },
     });
+    expect(reqCodeRes.statusCode).toBe(200);
+    const reqCodeJson = JSON.parse(reqCodeRes.payload);
+    expect(reqCodeJson.devOtp).toBeUndefined();
+    expect(reqCodeJson.devMagicToken).toBeUndefined();
 
     const adminMail = mailer.getLastSentEmail(adminEmail);
     expect(adminMail).toBeDefined();

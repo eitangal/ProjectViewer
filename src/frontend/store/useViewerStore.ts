@@ -11,6 +11,8 @@ interface ViewerState {
   direction: TextDirection;
   viewMode: ViewMode;
   contentWidth: 'full' | 'centered';
+  aiDrawerWidth: number;
+  isAiDrawerMaximized: boolean;
 
   // Active Navigation Context
   projectId: string;
@@ -25,6 +27,9 @@ interface ViewerState {
   setDirection: (dir: TextDirection) => void;
   setViewMode: (mode: ViewMode) => void;
   toggleContentWidth: () => void;
+  setAiDrawerWidth: (width: number) => void;
+  setAiDrawerMaximized: (maximized: boolean) => void;
+  toggleAiDrawerMaximized: () => void;
   setProjectId: (id: string) => void;
   setPreviewGroupId: (groupId: string | null) => void;
   setAuthorizedPaths: (paths: string[]) => void;
@@ -39,6 +44,8 @@ export const useViewerStore = create<ViewerState>()(
       direction: 'ltr',
       viewMode: 'formatted',
       contentWidth: 'full',
+      aiDrawerWidth: 384,
+      isAiDrawerMaximized: false,
       projectId: '',
       activeFilePath: null,
       activeHash: null,
@@ -51,13 +58,20 @@ export const useViewerStore = create<ViewerState>()(
       setViewMode: (viewMode) => set({ viewMode }),
       toggleContentWidth: () =>
         set((s) => ({ contentWidth: s.contentWidth === 'full' ? 'centered' : 'full' })),
+      setAiDrawerWidth: (aiDrawerWidth) => set({ aiDrawerWidth }),
+      setAiDrawerMaximized: (isAiDrawerMaximized) => set({ isAiDrawerMaximized }),
+      toggleAiDrawerMaximized: () =>
+        set((s) => ({
+          isAiDrawerMaximized: !s.isAiDrawerMaximized,
+          aiDrawerWidth: s.isAiDrawerMaximized && s.aiDrawerWidth > 900 ? 384 : s.aiDrawerWidth,
+        })),
       setProjectId: (projectId) => set({ projectId }),
       setPreviewGroupId: (previewGroupId) => set({ previewGroupId }),
       setAuthorizedPaths: (paths) => set({ authorizedPaths: paths }),
 
       navigateToFile: (targetPath, hash = null) => {
         const normalized = targetPath.replace(/^\/+/, '');
-        const { authorizedPaths } = get();
+        const { authorizedPaths, isAiDrawerMaximized } = get();
 
         // Client-side ACL gate check before switching view
         if (authorizedPaths.length > 0 && !authorizedPaths.includes(normalized)) {
@@ -70,6 +84,11 @@ export const useViewerStore = create<ViewerState>()(
             })
           );
           return false;
+        }
+
+        // If the assistant was taking the full workarea, un-maximize so the viewport is visible
+        if (isAiDrawerMaximized) {
+          set({ isAiDrawerMaximized: false });
         }
 
         set({ activeFilePath: normalized, activeHash: hash });
@@ -97,6 +116,8 @@ export const useViewerStore = create<ViewerState>()(
         isSidebarOpen: state.isSidebarOpen,
         direction: state.direction,
         viewMode: state.viewMode,
+        aiDrawerWidth: state.aiDrawerWidth,
+        isAiDrawerMaximized: state.isAiDrawerMaximized,
       }),
     }
   )

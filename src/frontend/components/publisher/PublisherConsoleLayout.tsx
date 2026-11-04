@@ -215,7 +215,12 @@ export const PublisherConsoleLayout: React.FC<{
                 return (
                   <AclRuleBuilderWorkspace
                     projectId={activeProject.id}
-                    activeGroup={groups.length > 0 ? groups[0] : null}
+                    activeGroup={
+                      groups.find((g) => g.id === selectedPreviewGroupId) ||
+                      (groups.length > 0 ? groups[0] : null)
+                    }
+                    groups={groups}
+                    onSelectGroup={(gid) => setSelectedPreviewGroupId(gid)}
                     onSaveGroup={onSaveGroup}
                   />
                 );

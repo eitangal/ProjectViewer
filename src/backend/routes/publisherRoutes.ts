@@ -488,6 +488,19 @@ export async function registerPublisherRoutes(
       projectId
     );
 
+    // If key is configured and project has been synced but not yet indexed, trigger background indexing
+    if (encKey && p.last_synced_sha) {
+      const existingChunkCount = (db
+        .prepare(`SELECT COUNT(*) as cnt FROM doc_chunks WHERE project_id = ?`)
+        .get(projectId) as any)?.cnt ?? 0;
+
+      if (existingChunkCount === 0) {
+        syncOrchestrator.syncProject(projectId, 'MANUAL', { forceReindex: true }).catch((err) => {
+          console.error('[AUTO-INDEX ERROR]', err);
+        });
+      }
+    }
+
     return reply.send({ ok: true });
   });
 }

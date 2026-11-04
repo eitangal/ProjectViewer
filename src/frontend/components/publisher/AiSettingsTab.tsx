@@ -14,7 +14,7 @@ export const AiSettingsTab: React.FC<{
 }> = ({ project, onSaveAiConfig, onTestKey }) => {
   const [apiKey, setApiKey] = useState(project.hasGeminiKey ? '••••••••••••••••••••••••' : '');
   const [isEditingKey, setIsEditingKey] = useState(!project.hasGeminiKey);
-  const [chatModel, setChatModel] = useState(project.geminiChatModel || 'gemini-2.5-flash');
+  const [chatModel, setChatModel] = useState(project.geminiChatModel || 'gemini-3.8-flash');
   const [systemPrompt, setSystemPrompt] = useState(
     project.systemPrompt ||
       'You are a technical repository assistant. Answer strictly using the provided context blocks.'
@@ -144,12 +144,17 @@ export const AiSettingsTab: React.FC<{
             onChange={(e) => setChatModel(e.target.value)}
             className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
           >
-            <option value="gemini-2.5-flash">
-              Gemini 2.5 Flash (Fast, cost-efficient, low-latency — Recommended)
+            <option value="gemini-3.8-flash">
+              Gemini 3.8 Flash (High intelligence, fast, low-latency — Recommended)
             </option>
-            <option value="gemini-2.5-pro">
-              Gemini 2.5 Pro (Deep reasoning for complex architectures & multi-file specifications)
+            <option value="gemini-3.5-flash-lite">
+              Gemini 3.5 Flash-Lite (Ultra-fast, cost-efficient, high-throughput)
             </option>
+            {chatModel !== 'gemini-3.8-flash' && chatModel !== 'gemini-3.5-flash-lite' && (
+              <option value={chatModel}>
+                {chatModel} (Current / Custom)
+              </option>
+            )}
           </select>
         </div>
 

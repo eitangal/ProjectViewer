@@ -142,8 +142,11 @@ export function MainApp() {
   useEffect(() => {
     if (treeData?.authorizedPaths) {
       setAuthorizedPaths(treeData.authorizedPaths);
-      // Auto-select first document if none selected
-      if (!activeFilePath && treeData.authorizedPaths.length > 0) {
+      // Auto-select first document if none selected or if previously active file is no longer authorized
+      if (
+        treeData.authorizedPaths.length > 0 &&
+        (!activeFilePath || !treeData.authorizedPaths.includes(activeFilePath))
+      ) {
         navigateToFile(treeData.authorizedPaths[0]);
       }
     }
@@ -175,6 +178,20 @@ export function MainApp() {
     retry: false,
   });
 
+  const handleLoginSuccess = useCallback((loggedInUser: any, redirectProj: string | null) => {
+    setUser(loggedInUser);
+    if (redirectProj) {
+      setProjectId(redirectProj);
+      setCurrentView('viewer');
+    } else if (loggedInUser.globalRole === 'SYSADMIN') {
+      setCurrentView('admin');
+    } else if (loggedInUser.globalRole === 'PUBLISHER') {
+      setCurrentView('publisher');
+    } else {
+      setCurrentView('viewer');
+    }
+  }, [setProjectId]);
+
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     setUser(null);
@@ -192,21 +209,7 @@ export function MainApp() {
   // 1. Unauthenticated Login Screen
   if (currentView === 'login' || !user) {
     return (
-      <LoginView
-        onLoginSuccess={(loggedInUser, redirectProj) => {
-          setUser(loggedInUser);
-          if (redirectProj) {
-            setProjectId(redirectProj);
-            setCurrentView('viewer');
-          } else if (loggedInUser.globalRole === 'SYSADMIN') {
-            setCurrentView('admin');
-          } else if (loggedInUser.globalRole === 'PUBLISHER') {
-            setCurrentView('publisher');
-          } else {
-            setCurrentView('viewer');
-          }
-        }}
-      />
+      <LoginView onLoginSuccess={handleLoginSuccess} />
     );
   }
 
@@ -309,9 +312,9 @@ export function MainApp() {
         }}
         onSaveGroup={async (group) => {
           if (!activeProject) return;
-          const existingGroup = groupsData?.groups?.[0];
-          if (existingGroup) {
-            await fetch(`/api/projects/${activeProject.id}/groups/${existingGroup.id}`, {
+          const targetGroupId = (group as any).id || groupsData?.groups?.[0]?.id;
+          if (targetGroupId) {
+            await fetch(`/api/projects/${activeProject.id}/groups/${targetGroupId}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(group),
@@ -323,7 +326,9 @@ export function MainApp() {
               body: JSON.stringify({ name: 'Default', ...group }),
             });
           }
-          refetchGroups();
+          await refetchGroups();
+          queryClient.invalidateQueries({ queryKey: ['viewer-tree'] });
+          queryClient.invalidateQueries({ queryKey: ['viewer-blob'] });
         }}
         onInviteViewer={async (email, groupIds) => {
           if (!activeProject) return;
@@ -380,6 +385,8 @@ export function MainApp() {
         onOpenViewer={(pId, pGroupId) => {
           setProjectId(pId);
           setPreviewGroupId(pGroupId || null);
+          queryClient.invalidateQueries({ queryKey: ['viewer-tree'] });
+          queryClient.invalidateQueries({ queryKey: ['viewer-blob'] });
           setCurrentView('viewer');
         }}
         onLogout={handleLogout}
@@ -393,15 +400,31 @@ export function MainApp() {
       {/* Publisher Banner if viewing in preview / owner mode */}
       {treeData?.isPublisher && (
         <div className="bg-indigo-950/80 border-b border-indigo-800/80 px-4 py-1.5 text-xs text-indigo-200 flex items-center justify-between z-40">
-          <span>
-            {previewGroupId ? (
-              <>
-                Impersonating Viewer Group <span className="font-semibold underline">Preview Mode</span>
-              </>
-            ) : (
-              'Publisher Workspace Preview'
-            )}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="font-semibold text-indigo-300">
+              {previewGroupId ? 'Preview Mode:' : 'Publisher Preview:'}
+            </span>
+            <div className="flex items-center gap-1.5 bg-slate-950/80 px-2 py-0.5 rounded-lg border border-indigo-700/50">
+              <span className="text-[11px] text-slate-400">View Authorization:</span>
+              <select
+                value={previewGroupId || ''}
+                onChange={(e) => {
+                  const newGid = e.target.value || null;
+                  setPreviewGroupId(newGid);
+                  queryClient.invalidateQueries({ queryKey: ['viewer-tree'] });
+                  queryClient.invalidateQueries({ queryKey: ['viewer-blob'] });
+                }}
+                className="bg-transparent border-0 text-xs text-indigo-200 font-medium focus:outline-none cursor-pointer"
+              >
+                <option value="" className="bg-slate-900 text-slate-100">Full Publisher View (All Files)</option>
+                {groupsData?.groups?.map((g) => (
+                  <option key={g.id} value={g.id} className="bg-slate-900 text-slate-100">
+                    Group: {g.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           <button
             onClick={() => setCurrentView('publisher')}
             className="px-2.5 py-0.5 rounded bg-indigo-800 hover:bg-indigo-700 text-white font-medium transition-colors"

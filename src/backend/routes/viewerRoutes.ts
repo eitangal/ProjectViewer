@@ -219,7 +219,7 @@ export async function registerViewerRoutes(
       const decryptedKey = decryptSecret(project.encrypted_gemini_key);
       const stream = geminiService.streamGroundedAnswer({
         decryptedGeminiKey: decryptedKey,
-        model: project.gemini_chat_model || 'gemini-2.5-flash',
+        model: project.gemini_chat_model || 'gemini-3.8-flash',
         systemPrompt: project.system_prompt,
         userQuestion: question.trim(),
         retrievedChunks: chunks,

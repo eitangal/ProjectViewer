@@ -18,6 +18,8 @@ import {
   Send,
   Settings,
   Key,
+  Sparkles,
+  ExternalLink,
 } from 'lucide-react';
 
 export const SysAdminConsole: React.FC<{
@@ -60,31 +62,25 @@ export const SysAdminConsole: React.FC<{
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedOtp, setCopiedOtp] = useState(false);
 
-  // SMTP Settings State
-  const [smtpHost, setSmtpHost] = useState('');
-  const [smtpPort, setSmtpPort] = useState(587);
-  const [smtpSecure, setSmtpSecure] = useState(false);
-  const [smtpUser, setSmtpUser] = useState('');
-  const [smtpPass, setSmtpPass] = useState('');
-  const [smtpFrom, setSmtpFrom] = useState('');
-  const [isSmtpConfigured, setIsSmtpConfigured] = useState(false);
+  // Brevo API Settings State
+  const [brevoApiKey, setBrevoApiKey] = useState('');
+  const [brevoSenderEmail, setBrevoSenderEmail] = useState('');
+  const [brevoSenderName, setBrevoSenderName] = useState('GitLens Portal');
+  const [isBrevoConfigured, setIsBrevoConfigured] = useState(false);
   const [testEmail, setTestEmail] = useState('');
-  const [isTestingSmtp, setIsTestingSmtp] = useState(false);
-  const [smtpTestResult, setSmtpTestResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [isSavingSmtp, setIsSavingSmtp] = useState(false);
+  const [isTestingBrevo, setIsTestingBrevo] = useState(false);
+  const [brevoTestResult, setBrevoTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isSavingBrevo, setIsSavingBrevo] = useState(false);
 
   useEffect(() => {
-    fetch('/api/admin/smtp')
+    fetch('/api/admin/email')
       .then((r) => r.json())
       .then((data) => {
-        setIsSmtpConfigured(!!data.isConfigured);
+        setIsBrevoConfigured(!!data.isConfigured);
         if (data.config) {
-          setSmtpHost(data.config.host || '');
-          setSmtpPort(data.config.port || 587);
-          setSmtpSecure(!!data.config.secure);
-          setSmtpUser(data.config.user || '');
-          setSmtpPass(data.config.pass || '');
-          setSmtpFrom(data.config.from || '');
+          setBrevoApiKey(data.config.apiKey || '');
+          setBrevoSenderEmail(data.config.senderEmail || '');
+          setBrevoSenderName(data.config.senderName || 'GitLens Portal');
         }
       })
       .catch(() => {});
@@ -120,62 +116,60 @@ export const SysAdminConsole: React.FC<{
     }
   };
 
-  const handleSaveSmtp = async (e: React.FormEvent) => {
+  const handleSaveBrevo = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSavingSmtp(true);
-    setSmtpTestResult(null);
+    if (!brevoApiKey.trim()) {
+      alert('Please provide a Brevo API key.');
+      return;
+    }
+    setIsSavingBrevo(true);
+    setBrevoTestResult(null);
     try {
-      const res = await fetch('/api/admin/smtp', {
+      const res = await fetch('/api/admin/email', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          host: smtpHost,
-          port: smtpPort,
-          secure: smtpSecure,
-          user: smtpUser,
-          pass: smtpPass,
-          from: smtpFrom,
+          apiKey: brevoApiKey,
+          senderEmail: brevoSenderEmail,
+          senderName: brevoSenderName,
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
-      setIsSmtpConfigured(true);
-      alert('SMTP settings saved successfully.');
+      setIsBrevoConfigured(true);
+      alert('Brevo API settings saved successfully.');
     } catch (err: any) {
-      alert(`Failed to save SMTP: ${err.message}`);
+      alert(`Failed to save Brevo API settings: ${err.message}`);
     } finally {
-      setIsSavingSmtp(false);
+      setIsSavingBrevo(false);
     }
   };
 
-  const handleTestSmtp = async () => {
-    if (!testEmail.trim() || !smtpHost.trim()) {
-      alert('Please provide SMTP Host and a recipient email for testing.');
+  const handleTestBrevo = async () => {
+    if (!testEmail.trim()) {
+      alert('Please provide a test recipient email address.');
       return;
     }
-    setIsTestingSmtp(true);
-    setSmtpTestResult(null);
+    setIsTestingBrevo(true);
+    setBrevoTestResult(null);
     try {
-      const res = await fetch('/api/admin/smtp/test', {
+      const res = await fetch('/api/admin/email/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          host: smtpHost,
-          port: smtpPort,
-          secure: smtpSecure,
-          user: smtpUser,
-          pass: smtpPass,
-          from: smtpFrom,
+          apiKey: brevoApiKey,
+          senderEmail: brevoSenderEmail,
+          senderName: brevoSenderName,
           testEmail: testEmail.trim(),
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
-      setSmtpTestResult({ success: true, message: json.message || 'Test email dispatched successfully.' });
+      setBrevoTestResult({ success: true, message: json.message || 'Test email dispatched successfully via Brevo API.' });
     } catch (err: any) {
-      setSmtpTestResult({ success: false, message: err.message || 'SMTP test failed.' });
+      setBrevoTestResult({ success: false, message: err.message || 'Brevo API test failed.' });
     } finally {
-      setIsTestingSmtp(false);
+      setIsTestingBrevo(false);
     }
   };
 
@@ -227,9 +221,9 @@ export const SysAdminConsole: React.FC<{
               }`}
             >
               <Mail size={13} />
-              <span>SMTP & Email Setup</span>
-              {!isSmtpConfigured && (
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="SMTP not configured" />
+              <span>Brevo API Email Setup</span>
+              {!isBrevoConfigured && (
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="Brevo API not configured" />
               )}
             </button>
           </div>
@@ -265,135 +259,147 @@ export const SysAdminConsole: React.FC<{
       {/* Main Dashboard Canvas */}
       <main className="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-950 flex flex-col gap-8 max-w-6xl mx-auto w-full">
         {activeTab === 'smtp' ? (
-          /* SMTP Configuration Tab */
+          /* Brevo API Configuration Tab */
           <div className="flex flex-col gap-6">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col gap-5">
               <div className="flex items-start justify-between">
                 <div>
                   <h2 className="text-base font-semibold text-slate-100 flex items-center gap-2">
                     <Mail size={18} className="text-indigo-400" />
-                    <span>Transactional Email & SMTP Delivery Configuration</span>
+                    <span>Brevo Transactional Email Configuration (REST API)</span>
+                    <span className="text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800/80">
+                      HTTPS REST API
+                    </span>
                   </h2>
                   <p className="text-xs text-slate-400 mt-1">
-                    Configure your outbound SMTP mail server (Gmail, SendGrid, Mailgun, AWS SES, or standard relay) so Publisher and Viewer invitations are dispatched directly to inboxes.
+                    Send passwordless onboarding invitations and Viewer 1-click magic links / OTPs directly via Brevo's HTTPS REST API using your Brevo API key.
                   </p>
                 </div>
 
                 <span
                   className={`text-xs px-3 py-1 rounded-full font-medium flex items-center gap-1.5 ${
-                    isSmtpConfigured
+                    isBrevoConfigured
                       ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
                       : 'bg-amber-950 text-amber-300 border border-amber-800'
                   }`}
                 >
-                  {isSmtpConfigured ? (
+                  {isBrevoConfigured ? (
                     <>
                       <CheckCircle2 size={13} />
-                      <span>SMTP Configured</span>
+                      <span>Brevo API Configured</span>
                     </>
                   ) : (
                     <>
                       <AlertCircle size={13} />
-                      <span>SMTP Not Configured (Console Fallback)</span>
+                      <span>Not Configured (Console Fallback)</span>
                     </>
                   )}
                 </span>
               </div>
 
-              {!isSmtpConfigured && (
+              {/* Brevo API Quick Setup Guide */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 flex flex-col gap-2.5 text-xs text-slate-300">
+                <div className="flex items-center justify-between text-indigo-300 font-medium">
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles size={14} className="text-indigo-400" />
+                    Brevo REST API Credentials &amp; Requirements
+                  </span>
+                  <a
+                    href="https://app.brevo.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] text-indigo-400 hover:underline flex items-center gap-1"
+                  >
+                    <span>Open Brevo Console</span>
+                    <ExternalLink size={11} />
+                  </a>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1 text-[11px]">
+                  <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 flex flex-col gap-1">
+                    <span className="font-semibold text-slate-200">1. Brevo API Key</span>
+                    <span className="text-slate-400">Navigate to <strong>SMTP &amp; API</strong> &rarr; <strong>API Keys</strong> tab. Click <em>Generate a new API key</em>. Key starts with <code className="text-indigo-300">xkeysib-...</code></span>
+                  </div>
+                  <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 flex flex-col gap-1">
+                    <span className="font-semibold text-slate-200">2. Verified Sender Email</span>
+                    <span className="text-slate-400">Navigate to <strong>Senders &amp; IP</strong> &rarr; <strong>Senders</strong>. The sender email or domain must be verified in your Brevo account.</span>
+                  </div>
+                  <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 flex flex-col gap-1">
+                    <span className="font-semibold text-slate-200">3. Direct HTTPS Dispatch</span>
+                    <span className="text-slate-400">Uses native HTTPS requests to <code className="text-indigo-300">api.brevo.com/v3/smtp/email</code>. No SMTP ports or socket restrictions.</span>
+                  </div>
+                </div>
+              </div>
+
+              {!isBrevoConfigured && (
                 <div className="bg-amber-950/40 border border-amber-800/80 rounded-xl p-4 text-xs text-amber-200 flex items-start gap-3">
                   <AlertCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
                   <p className="leading-relaxed">
-                    <strong>Notice:</strong> Without SMTP credentials, invitation emails are not sent over the internet to recipient inboxes. Invitations will still be created, but you must manually copy the 1-click Magic Link or 6-digit OTP code to share with the invited user.
+                    <strong>Notice:</strong> Without a Brevo API key, invitation emails are not dispatched over the internet. Invitations will still be created, and verification codes/links will be logged directly to the server console.
                   </p>
                 </div>
               )}
 
-              <form onSubmit={handleSaveSmtp} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-slate-300">SMTP Host</label>
-                  <input
-                    type="text"
-                    required
-                    value={smtpHost}
-                    onChange={(e) => setSmtpHost(e.target.value)}
-                    placeholder="smtp.gmail.com or smtp.sendgrid.net"
-                    className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-slate-300">SMTP Port</label>
-                  <input
-                    type="number"
-                    required
-                    value={smtpPort}
-                    onChange={(e) => setSmtpPort(Number(e.target.value))}
-                    placeholder="587"
-                    className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-slate-300">SMTP Username / Email</label>
-                  <input
-                    type="text"
-                    value={smtpUser}
-                    onChange={(e) => setSmtpUser(e.target.value)}
-                    placeholder="apikey or your-email@gmail.com"
-                    className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-slate-300">SMTP Password / App Password</label>
+              <form onSubmit={handleSaveBrevo} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5 md:col-span-2">
+                  <label className="text-xs font-medium text-slate-300">Brevo API Key (starts with xkeysib-)</label>
                   <input
                     type="password"
-                    value={smtpPass}
-                    onChange={(e) => setSmtpPass(e.target.value)}
-                    placeholder="••••••••••••••••"
+                    required
+                    value={brevoApiKey}
+                    onChange={(e) => setBrevoApiKey(e.target.value)}
+                    placeholder="xkeysib-••••••••••••••••••••••••••••••••••••••••"
                     className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
                   />
+                  <span className="text-[10px] text-slate-400">
+                    Generated from Brevo Dashboard &rarr; <strong>SMTP &amp; API</strong> &rarr; <strong>API Keys</strong> tab.
+                  </span>
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-slate-300">From Sender Address</label>
+                  <label className="text-xs font-medium text-slate-300">Verified Sender Email</label>
                   <input
-                    type="text"
-                    value={smtpFrom}
-                    onChange={(e) => setSmtpFrom(e.target.value)}
-                    placeholder="portal@yourdomain.com or Your Name <you@domain.com>"
+                    type="email"
+                    required
+                    value={brevoSenderEmail}
+                    onChange={(e) => setBrevoSenderEmail(e.target.value)}
+                    placeholder="noreply@your-verified-domain.com"
                     className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
                   />
+                  <span className="text-[10px] text-slate-400">
+                    Must be verified under <strong>Senders &amp; IP &rarr; Senders</strong> in your Brevo account.
+                  </span>
                 </div>
 
-                <div className="flex items-center gap-2 pt-6">
-                  <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={smtpSecure}
-                      onChange={(e) => setSmtpSecure(e.target.checked)}
-                      className="rounded bg-slate-950 border-slate-800 text-indigo-600 focus:ring-0"
-                    />
-                    <span>Use SSL / TLS (typically Port 465; uncheck for 587 STARTTLS)</span>
-                  </label>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-slate-300">Sender Display Name</label>
+                  <input
+                    type="text"
+                    value={brevoSenderName}
+                    onChange={(e) => setBrevoSenderName(e.target.value)}
+                    placeholder="GitLens Portal"
+                    className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                  />
+                  <span className="text-[10px] text-slate-400">
+                    Name displayed in the recipient's inbox (e.g. "GitLens Portal").
+                  </span>
                 </div>
 
-                <div className="md:col-span-2 pt-2">
+                <div className="md:col-span-2 pt-2 flex items-center gap-3">
                   <button
                     type="submit"
-                    disabled={isSavingSmtp}
+                    disabled={isSavingBrevo}
                     className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-5 py-2 rounded-xl text-xs transition-colors"
                   >
-                    {isSavingSmtp ? 'Saving Settings...' : 'Save SMTP Settings'}
+                    {isSavingBrevo ? 'Saving Settings...' : 'Save Brevo API Settings'}
                   </button>
                 </div>
               </form>
 
-              {/* SMTP Test Tool */}
+              {/* API Test Tool */}
               <div className="border-t border-slate-800 pt-5 mt-2 flex flex-col gap-3">
-                <h3 className="text-xs font-semibold text-slate-200 uppercase tracking-wider">
-                  Test Email Delivery
+                <h3 className="text-xs font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                  <Send size={13} className="text-indigo-400" />
+                  <span>Test Brevo API Dispatch</span>
                 </h3>
                 <div className="flex gap-2 max-w-lg">
                   <input
@@ -405,25 +411,25 @@ export const SysAdminConsole: React.FC<{
                   />
                   <button
                     type="button"
-                    onClick={handleTestSmtp}
-                    disabled={isTestingSmtp}
+                    onClick={handleTestBrevo}
+                    disabled={isTestingBrevo}
                     className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium transition-colors shrink-0"
                   >
                     <Send size={13} />
-                    <span>{isTestingSmtp ? 'Testing...' : 'Send Test Email'}</span>
+                    <span>{isTestingBrevo ? 'Sending Test...' : 'Send Test Email'}</span>
                   </button>
                 </div>
 
-                {smtpTestResult && (
+                {brevoTestResult && (
                   <div
                     className={`p-3 rounded-xl text-xs flex items-center gap-2 border ${
-                      smtpTestResult.success
+                      brevoTestResult.success
                         ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
                         : 'bg-rose-950/60 border-rose-800 text-rose-300'
                     }`}
                   >
-                    {smtpTestResult.success ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
-                    <span>{smtpTestResult.message}</span>
+                    {brevoTestResult.success ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
+                    <span>{brevoTestResult.message}</span>
                   </div>
                 )}
               </div>
@@ -545,10 +551,16 @@ export const SysAdminConsole: React.FC<{
             {/* Email Delivery Audit Log (SYS-03) */}
             {telemetry?.recentEmailLogs && (
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col gap-4">
-                <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
-                  <Mail size={16} className="text-indigo-400" />
-                  <span>Transactional Email Delivery Statuses</span>
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                    <Mail size={16} className="text-indigo-400" />
+                    <span>Transactional Email Delivery Statuses</span>
+                  </h3>
+                  <span className="text-[11px] font-mono text-slate-400 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    Brevo REST API (v3)
+                  </span>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
@@ -571,7 +583,7 @@ export const SysAdminConsole: React.FC<{
                               </span>
                             ) : log.status === 'NOT_CONFIGURED' ? (
                               <span className="text-amber-400 flex items-center gap-1" title={log.error_message}>
-                                <AlertCircle size={12} /> SMTP Not Set
+                                <AlertCircle size={12} /> API Key Not Set
                               </span>
                             ) : (
                               <span className="text-rose-400 flex items-center gap-1" title={log.error_message}>
@@ -689,12 +701,12 @@ export const SysAdminConsole: React.FC<{
 
             {inviteResult.emailSent ? (
               <div className="bg-emerald-950/40 border border-emerald-800/80 rounded-xl p-3 text-xs text-emerald-200">
-                ✅ Invitation email dispatched successfully to recipient inbox.
+                ✅ Invitation email dispatched successfully to recipient inbox via Brevo API.
               </div>
             ) : (
               <div className="bg-amber-950/40 border border-amber-800/80 rounded-xl p-3 text-xs text-amber-200 flex flex-col gap-1">
                 <span className="font-semibold text-amber-300">
-                  ⚠️ SMTP server is not configured.
+                  ⚠️ Brevo API is not configured.
                 </span>
                 <span>
                   The invitation was not sent over the internet. You can copy the 1-click Direct Link or 6-digit OTP code below to share directly with the user:
@@ -744,7 +756,7 @@ export const SysAdminConsole: React.FC<{
             )}
 
             <div className="flex items-center justify-between pt-2">
-              {!isSmtpConfigured && (
+              {!isBrevoConfigured && (
                 <button
                   onClick={() => {
                     setInviteResult(null);
@@ -753,7 +765,7 @@ export const SysAdminConsole: React.FC<{
                   className="text-xs text-indigo-400 hover:underline flex items-center gap-1"
                 >
                   <Settings size={13} />
-                  <span>Configure SMTP Server</span>
+                  <span>Configure Brevo API</span>
                 </button>
               )}
               <button

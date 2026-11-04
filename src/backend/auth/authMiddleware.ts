@@ -66,7 +66,9 @@ export function buildAuthMiddlewares(db: Database.Database) {
     if (reply.sent || !req.user) return;
 
     const { projectId } = req.params as { projectId: string };
-    const { previewGroupId } = req.query as { previewGroupId?: string };
+    const queryPreviewGroupId = (req.query as any)?.previewGroupId;
+    const bodyPreviewGroupId = (req.body as any)?.previewGroupId;
+    const previewGroupId = queryPreviewGroupId || bodyPreviewGroupId;
 
     const project = db
       .prepare(`SELECT id, owner_id FROM projects WHERE id = ?`)

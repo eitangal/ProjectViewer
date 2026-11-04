@@ -298,7 +298,7 @@ export const ViewerInvitationsTab: React.FC<{
             ) : (
               <div className="bg-amber-950/40 border border-amber-800/80 rounded-xl p-3 text-xs text-amber-200 flex flex-col gap-1">
                 <span className="font-semibold text-amber-300">
-                  ⚠️ SMTP server is not configured.
+                  ⚠️ Email service is not configured.
                 </span>
                 <span>
                   The invitation was not sent over the internet. You can copy the 1-click Direct Link or 6-digit OTP code below to share directly with the viewer:

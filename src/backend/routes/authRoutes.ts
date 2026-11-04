@@ -13,13 +13,10 @@ export async function registerAuthRoutes(
     if (!email) {
       return reply.code(400).send({ error: 'Email is required' });
     }
-    const challenge = await authService.requestLoginChallenge(email);
-    const isDev = !process.env.SMTP_HOST || process.env.NODE_ENV !== 'production';
+    await authService.requestLoginChallenge(email);
 
     return reply.send({
       message: 'If your email is registered, a code has been sent.',
-      devOtp: isDev && challenge ? challenge.otpCode : undefined,
-      devMagicToken: isDev && challenge ? challenge.magicToken : undefined,
     });
   });
 
@@ -54,11 +51,11 @@ export async function registerAuthRoutes(
     }
   });
 
-  // 3. GET /api/auth/verify (browser link redirect handler)
-  app.get('/api/auth/verify', async (req, reply) => {
+  // 3. GET /api/auth/verify & GET /auth/verify (browser link redirect handler)
+  const verifyGetHandler = async (req: any, reply: any) => {
     const { token } = req.query as { token?: string };
     if (!token) {
-      return reply.redirect('/login?error=missing_token');
+      return reply.redirect('/?error=missing_token');
     }
     try {
       const result = await authService.verifyChallenge({ magicToken: token });
@@ -77,9 +74,12 @@ export async function registerAuthRoutes(
       }
       return reply.redirect('/publisher');
     } catch {
-      return reply.redirect('/login?error=invalid_or_expired_token');
+      return reply.redirect('/?error=invalid_or_expired_token');
     }
-  });
+  };
+
+  app.get('/api/auth/verify', verifyGetHandler);
+  app.get('/auth/verify', verifyGetHandler);
 
   // 4. Get Current Active User
   app.get('/api/auth/me', { preHandler: [middlewares.requireAuth] }, async (req, reply) => {

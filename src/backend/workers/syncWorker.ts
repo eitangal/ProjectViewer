@@ -159,7 +159,7 @@ export class ProjectSyncAndRagOrchestrator {
             const embeddings = await this.geminiService.embedChunks(
               geminiKey,
               chunks.map((c) => c.content),
-              project.gemini_embedding_model || 'text-embedding-004'
+              project.gemini_embedding_model || 'gemini-embedding-001'
             );
 
             const insertFileTx = this.db.transaction(() => {
@@ -270,6 +270,15 @@ export class ProjectSyncAndRagOrchestrator {
       throw new Error('RAG assistant is not configured or project has not been synced.');
     }
 
+    // Auto-index repository chunks on-the-fly if not yet indexed
+    const existingChunkCount = (this.db
+      .prepare(`SELECT COUNT(*) as cnt FROM doc_chunks WHERE project_id = ?`)
+      .get(projectId) as any)?.cnt ?? 0;
+
+    if (existingChunkCount === 0) {
+      await this.syncProject(projectId, 'MANUAL', { forceReindex: true });
+    }
+
     // 1. Resolve exact authorized file list for this viewer's groups
     const allRepoFiles = await this.gitManager.listRepoFiles(
       projectId,
@@ -287,7 +296,7 @@ export class ProjectSyncAndRagOrchestrator {
     const [queryVector] = await this.geminiService.embedChunks(
       geminiKey,
       [userQuestion],
-      project.gemini_embedding_model || 'text-embedding-004'
+      project.gemini_embedding_model || 'gemini-embedding-001'
     );
 
     // 3. Query sqlite-vec joined strictly against authorized file paths
