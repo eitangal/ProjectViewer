@@ -405,13 +405,18 @@ export async function registerPublisherRoutes(
     }
 
     try {
-      await authService.inviteViewerToGroups({
+      const origin = req.headers.origin || (req.headers.host ? `${req.protocol}://${req.headers.host}` : null);
+      if (origin) {
+        authService.setPortalBaseUrl(origin);
+      }
+
+      const inviteResult = await authService.inviteViewerToGroups({
         publisherUserId: req.user!.sub,
         projectId,
         viewerEmail: email,
         groupIds,
       });
-      return reply.send({ ok: true });
+      return reply.send({ ok: true, ...inviteResult });
     } catch (err: any) {
       return reply.code(400).send({ error: err.message || 'Failed to invite viewer' });
     }

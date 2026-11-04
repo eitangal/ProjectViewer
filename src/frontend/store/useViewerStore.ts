@@ -10,6 +10,7 @@ interface ViewerState {
   isAiDrawerOpen: boolean;
   direction: TextDirection;
   viewMode: ViewMode;
+  contentWidth: 'full' | 'centered';
 
   // Active Navigation Context
   projectId: string;
@@ -23,6 +24,7 @@ interface ViewerState {
   toggleAiDrawer: () => void;
   setDirection: (dir: TextDirection) => void;
   setViewMode: (mode: ViewMode) => void;
+  toggleContentWidth: () => void;
   setProjectId: (id: string) => void;
   setPreviewGroupId: (groupId: string | null) => void;
   setAuthorizedPaths: (paths: string[]) => void;
@@ -36,6 +38,7 @@ export const useViewerStore = create<ViewerState>()(
       isAiDrawerOpen: false,
       direction: 'ltr',
       viewMode: 'formatted',
+      contentWidth: 'full',
       projectId: '',
       activeFilePath: null,
       activeHash: null,
@@ -46,6 +49,8 @@ export const useViewerStore = create<ViewerState>()(
       toggleAiDrawer: () => set((s) => ({ isAiDrawerOpen: !s.isAiDrawerOpen })),
       setDirection: (direction) => set({ direction }),
       setViewMode: (viewMode) => set({ viewMode }),
+      toggleContentWidth: () =>
+        set((s) => ({ contentWidth: s.contentWidth === 'full' ? 'centered' : 'full' })),
       setProjectId: (projectId) => set({ projectId }),
       setPreviewGroupId: (previewGroupId) => set({ previewGroupId }),
       setAuthorizedPaths: (paths) => set({ authorizedPaths: paths }),

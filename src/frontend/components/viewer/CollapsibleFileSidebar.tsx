@@ -126,6 +126,10 @@ export const CollapsibleFileSidebar: React.FC<{
     });
   };
 
+  if (!isSidebarOpen) {
+    return null;
+  }
+
   return (
     <aside className="w-72 border-e border-slate-800 bg-slate-950 flex flex-col shrink-0 overflow-hidden h-full z-20">
       {/* Quick Search Header */}

@@ -241,9 +241,11 @@ export function MainApp() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(data),
             });
-            if (!res.ok) throw new Error((await res.json()).error);
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.error);
             refetchPublishers();
             refetchTelemetry();
+            return json;
           }}
           onUpdatePublisher={async (userId, data) => {
             await fetch(`/api/admin/publishers/${userId}`, {
@@ -330,8 +332,10 @@ export function MainApp() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, groupIds }),
           });
-          if (!res.ok) throw new Error((await res.json()).error);
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error);
           refetchViewers();
+          return json;
         }}
         onBulkInvite={async (entries) => {
           if (!activeProject) return;
@@ -340,8 +344,10 @@ export function MainApp() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ entries }),
           });
-          if (!res.ok) throw new Error((await res.json()).error);
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error);
           refetchViewers();
+          return json;
         }}
         onRevokeViewer={async (viewerId) => {
           if (!activeProject) return;
@@ -418,6 +424,7 @@ export function MainApp() {
           isLoading={isBlobLoading}
           isRestricted={blobError ? (blobError as any).message?.includes('Access restricted') : false}
           errorMessage={blobError ? (blobError as any).message : null}
+          projectId={targetProjectId}
         />
         {targetProjectId && <RagAssistantDrawer projectId={targetProjectId} />}
       </ViewerWorkspaceLayout>

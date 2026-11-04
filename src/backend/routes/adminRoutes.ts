@@ -2,12 +2,14 @@ import { FastifyInstance } from 'fastify';
 import Database from 'better-sqlite3';
 import { AuthService } from '../auth/authService.js';
 import { buildAuthMiddlewares } from '../auth/authMiddleware.js';
+import { PortalMailer, SmtpConfig } from '../auth/mailer.js';
 
 export async function registerAdminRoutes(
   app: FastifyInstance,
   db: Database.Database,
   authService: AuthService,
-  middlewares: ReturnType<typeof buildAuthMiddlewares>
+  middlewares: ReturnType<typeof buildAuthMiddlewares>,
+  mailer?: PortalMailer
 ) {
   const adminGuard = { preHandler: [middlewares.requireRole(['SYSADMIN'])] };
 
@@ -23,12 +25,18 @@ export async function registerAdminRoutes(
       return reply.code(400).send({ error: 'Email is required' });
     }
 
-    const userId = await authService.invitePublisher(req.user!.sub, email, {
+    // Detect public URL from request origin/host
+    const origin = req.headers.origin || (req.headers.host ? `${req.protocol}://${req.headers.host}` : null);
+    if (origin) {
+      authService.setPortalBaseUrl(origin);
+    }
+
+    const inviteResult = await authService.invitePublisher(req.user!.sub, email, {
       maxRepos,
       maxDiskQuotaBytes,
       maxViewers,
     });
-    return reply.send({ ok: true, userId });
+    return reply.send({ ok: true, ...inviteResult });
   });
 
   // 2. SysAdmin lists publishers & quotas (SYS-02)
@@ -135,5 +143,82 @@ export async function registerAdminRoutes(
     `).run(key, JSON.stringify(value), Date.now());
 
     return reply.send({ ok: true });
+  });
+
+  // 6. SMTP Management & Verification
+  app.get('/api/admin/smtp', adminGuard, async (req, reply) => {
+    const config = mailer?.getSmtpConfig();
+    return reply.send({
+      isConfigured: !!config,
+      config: config
+        ? {
+            host: config.host,
+            port: config.port,
+            secure: config.secure,
+            user: config.user,
+            pass: config.pass ? '••••••••' : '',
+            from: config.from,
+          }
+        : null,
+    });
+  });
+
+  app.put('/api/admin/smtp', adminGuard, async (req, reply) => {
+    const { host, port, secure, user, pass, from } = req.body as SmtpConfig;
+    if (!host) {
+      return reply.code(400).send({ error: 'SMTP host is required' });
+    }
+
+    const current = mailer?.getSmtpConfig();
+    const finalPass = pass === '••••••••' || pass === undefined ? (current?.pass || '') : pass;
+
+    const newConfig: SmtpConfig = {
+      host: host.trim(),
+      port: Number(port) || 587,
+      secure: Boolean(secure),
+      user: (user || '').trim(),
+      pass: finalPass,
+      from: (from || 'noreply@gitlens-portal.local').trim(),
+    };
+
+    db.prepare(`
+      INSERT INTO system_settings (key, value_json, updated_at)
+      VALUES ('smtp_config', ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
+    `).run(JSON.stringify(newConfig), Date.now());
+
+    mailer?.reloadTransporter();
+
+    return reply.send({ ok: true, isConfigured: true });
+  });
+
+  app.post('/api/admin/smtp/test', adminGuard, async (req, reply) => {
+    const { host, port, secure, user, pass, from, testEmail } = req.body as SmtpConfig & { testEmail: string };
+    if (!host || !testEmail) {
+      return reply.code(400).send({ error: 'SMTP host and test recipient email are required' });
+    }
+
+    const current = mailer?.getSmtpConfig();
+    const finalPass = pass === '••••••••' || pass === undefined ? (current?.pass || '') : pass;
+
+    const testConfig: SmtpConfig = {
+      host: host.trim(),
+      port: Number(port) || 587,
+      secure: Boolean(secure),
+      user: (user || '').trim(),
+      pass: finalPass,
+      from: (from || 'noreply@gitlens-portal.local').trim(),
+    };
+
+    if (!mailer) {
+      return reply.code(500).send({ error: 'Mailer service unavailable' });
+    }
+
+    const result = await mailer.testSmtpConnection(testConfig, testEmail.trim());
+    if (!result.success) {
+      return reply.code(400).send({ error: result.error || 'SMTP test failed' });
+    }
+
+    return reply.send({ ok: true, message: `Test email successfully dispatched to ${testEmail}` });
   });
 }

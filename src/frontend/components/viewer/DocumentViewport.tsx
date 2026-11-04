@@ -13,9 +13,11 @@ export const DocumentViewport: React.FC<{
   isLoading: boolean;
   isRestricted?: boolean;
   errorMessage?: string | null;
-}> = ({ content, isLoading, isRestricted = false, errorMessage = null }) => {
-  const { activeFilePath, activeHash, viewMode } = useViewerStore();
+  projectId?: string;
+}> = ({ content, isLoading, isRestricted = false, errorMessage = null, projectId }) => {
+  const { activeFilePath, activeHash, viewMode, contentWidth, projectId: storeProjectId } = useViewerStore();
   const viewportRef = useRef<HTMLDivElement>(null);
+  const effectiveProjectId = projectId || storeProjectId;
 
   // Handle anchor scrolling after document renders
   useEffect(() => {
@@ -87,12 +89,35 @@ export const DocumentViewport: React.FC<{
 
   const format = detectDocumentFormat(activeFilePath, content);
 
+  // 1. Full-Bleed Interactive HTML Application (Full Workarea, with Scripts and Audio)
+  if (format === 'html' && viewMode !== 'raw') {
+    return (
+      <main ref={viewportRef} className="flex-1 h-full w-full overflow-hidden flex flex-col bg-slate-950">
+        <SandboxedHtmlRenderer
+          htmlContent={content}
+          filePath={activeFilePath}
+          projectId={effectiveProjectId}
+        />
+      </main>
+    );
+  }
+
+  // 2. Full-Bleed OpenAPI Reference View
+  if (format === 'openapi' && viewMode !== 'raw') {
+    return (
+      <main ref={viewportRef} className="flex-1 h-full w-full overflow-y-auto bg-slate-950 p-2 md:p-6">
+        <OpenApiSpecRenderer rawSpec={content} />
+      </main>
+    );
+  }
+
+  // 3. Fluid Responsive Document & Code Viewport
   return (
     <main
       ref={viewportRef}
-      className="flex-1 overflow-y-auto p-6 md:p-10 bg-slate-950 relative"
+      className="flex-1 overflow-y-auto px-6 py-6 md:px-10 bg-slate-950 relative"
     >
-      <div className="max-w-4xl mx-auto min-h-full">
+      <div className={contentWidth === 'full' ? 'w-full min-h-full' : 'max-w-5xl mx-auto min-h-full'}>
         {viewMode === 'raw' ? (
           <RawCodeRenderer code={content} filePath={activeFilePath} />
         ) : (
@@ -100,12 +125,8 @@ export const DocumentViewport: React.FC<{
             switch (format) {
               case 'markdown':
                 return <MarkdownRenderer markdown={content} />;
-              case 'openapi':
-                return <OpenApiSpecRenderer rawSpec={content} />;
               case 'mermaid':
                 return <MermaidBlock chart={content} />;
-              case 'html':
-                return <SandboxedHtmlRenderer htmlContent={content} />;
               case 'code':
               default:
                 return <RawCodeRenderer code={content} filePath={activeFilePath} />;

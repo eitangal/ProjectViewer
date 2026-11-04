@@ -70,7 +70,7 @@ export function buildApp(config: AppConfig): {
 
   // Register Routes
   registerAuthRoutes(app, authService, middlewares);
-  registerAdminRoutes(app, db, authService, middlewares);
+  registerAdminRoutes(app, db, authService, middlewares, mailer);
   registerPublisherRoutes(app, db, authService, middlewares, gitManager, syncOrchestrator, geminiService);
   registerViewerRoutes(app, db, middlewares, gitManager, syncOrchestrator, geminiService);
 

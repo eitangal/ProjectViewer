@@ -97,6 +97,49 @@ export async function registerViewerRoutes(
     }
   });
 
+  // 3. Raw File Serving Endpoint with MIME types & Full Script Execution (VIE-03)
+  app.get('/api/viewer/:projectId/raw/*', viewerGuard, async (req, reply) => {
+    const { projectId } = req.params as { projectId: string };
+    const rawPath = (req.params as any)['*'];
+
+    if (!rawPath) {
+      return reply.code(400).send({ error: 'File path parameter is required' });
+    }
+
+    const normalizedPath = rawPath.replace(/^\/+/, '');
+    const project = db
+      .prepare(`SELECT id, last_synced_sha FROM projects WHERE id = ?`)
+      .get(projectId) as any;
+
+    if (!project?.last_synced_sha) {
+      return reply.code(404).send({ error: 'Repository has not been synced yet' });
+    }
+
+    const allRepoFiles = await gitManager.listRepoFiles(projectId, project.last_synced_sha);
+    const authorizedPaths = resolveAuthorizedFiles(allRepoFiles, req.projectAclRules || []);
+
+    if (!authorizedPaths.includes(normalizedPath)) {
+      return reply.code(403).send({
+        error: `Access restricted: "${normalizedPath}" is outside your viewer group scope.`,
+        restricted: true,
+      });
+    }
+
+    try {
+      const content = await gitManager.readFileBlob(
+        projectId,
+        project.last_synced_sha,
+        normalizedPath
+      );
+
+      const mimeType = getMimeType(normalizedPath);
+      reply.header('Content-Type', mimeType);
+      return reply.send(content);
+    } catch (err: any) {
+      return reply.code(404).send({ error: 'File not found in repository commit' });
+    }
+  });
+
   // 3. ACL-Scoped Viewer RAG Query (VIE-06, Flow B)
   app.post('/api/viewer/:projectId/rag/chat', viewerGuard, async (req, reply) => {
     const { projectId } = req.params as { projectId: string };
@@ -200,4 +243,47 @@ export async function registerViewerRoutes(
       reply.raw.end();
     }
   });
+}
+
+function getMimeType(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'html':
+    case 'htm':
+      return 'text/html; charset=utf-8';
+    case 'js':
+    case 'mjs':
+      return 'application/javascript; charset=utf-8';
+    case 'css':
+      return 'text/css; charset=utf-8';
+    case 'json':
+      return 'application/json; charset=utf-8';
+    case 'svg':
+      return 'image/svg+xml';
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'gif':
+      return 'image/gif';
+    case 'webp':
+      return 'image/webp';
+    case 'mp3':
+      return 'audio/mpeg';
+    case 'wav':
+      return 'audio/wav';
+    case 'ogg':
+      return 'audio/ogg';
+    case 'mp4':
+      return 'video/mp4';
+    case 'webm':
+      return 'video/webm';
+    case 'pdf':
+      return 'application/pdf';
+    case 'md':
+      return 'text/markdown; charset=utf-8';
+    default:
+      return 'text/plain; charset=utf-8';
+  }
 }

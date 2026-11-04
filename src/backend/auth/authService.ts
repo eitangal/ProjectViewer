@@ -26,8 +26,14 @@ export class AuthService {
   constructor(
     private readonly db: Database.Database,
     private readonly mailer: MailDispatcher,
-    private readonly portalBaseUrl: string = 'http://localhost:5173'
+    private portalBaseUrl: string = 'http://localhost:5173'
   ) {}
+
+  public setPortalBaseUrl(url: string): void {
+    if (url && url.trim()) {
+      this.portalBaseUrl = url.trim().replace(/\/+$/, '');
+    }
+  }
 
   /**
    * Seeds the root SysAdmin account on server startup if not already seeded
@@ -50,7 +56,14 @@ export class AuthService {
     sysAdminUserId: string,
     targetEmail: string,
     quotas?: { maxRepos?: number; maxDiskQuotaBytes?: number; maxViewers?: number }
-  ): Promise<string> {
+  ): Promise<{
+    userId: string;
+    email: string;
+    magicLinkUrl: string;
+    otpCode: string;
+    emailSent: boolean;
+    error?: string;
+  }> {
     const email = targetEmail.trim().toLowerCase();
     const existing = this.db.prepare(`SELECT id, global_role FROM users WHERE email = ?`).get(email) as any;
     let userId = existing?.id;
@@ -88,14 +101,21 @@ export class AuthService {
         );
     }
 
-    await this.issueChallengeAndSendEmail(
+    const challenge = await this.issueChallengeAndSendEmail(
       email,
       'INVITE_PUBLISHER',
       null,
       'You have been invited as a Project Publisher'
     );
 
-    return userId;
+    return {
+      userId,
+      email,
+      magicLinkUrl: challenge.magicLinkUrl,
+      otpCode: challenge.otpCode,
+      emailSent: challenge.emailSent,
+      error: challenge.error,
+    };
   }
 
   /**
@@ -106,7 +126,13 @@ export class AuthService {
     projectId: string;
     viewerEmail: string;
     groupIds: string[];
-  }): Promise<void> {
+  }): Promise<{
+    email: string;
+    magicLinkUrl: string;
+    otpCode: string;
+    emailSent: boolean;
+    error?: string;
+  }> {
     const email = params.viewerEmail.trim().toLowerCase();
 
     // Verify Publisher owns this project (or caller is SysAdmin)
@@ -175,12 +201,20 @@ export class AuthService {
 
     tx();
 
-    await this.issueChallengeAndSendEmail(
+    const challenge = await this.issueChallengeAndSendEmail(
       email,
       'INVITE_VIEWER',
       params.projectId,
       `You have been invited to view project "${project.name}"`
     );
+
+    return {
+      email,
+      magicLinkUrl: challenge.magicLinkUrl,
+      otpCode: challenge.otpCode,
+      emailSent: challenge.emailSent,
+      error: challenge.error,
+    };
   }
 
   /**
@@ -328,7 +362,13 @@ export class AuthService {
     purpose: string,
     projectId: string | null,
     subject: string
-  ): Promise<{ magicToken: string; otpCode: string }> {
+  ): Promise<{
+    magicToken: string;
+    otpCode: string;
+    magicLinkUrl: string;
+    emailSent: boolean;
+    error?: string;
+  }> {
     const { rawMagicToken, rawOtp, tokenHash, otpHash } =
       generateVerificationChallenge(email);
 
@@ -352,7 +392,7 @@ export class AuthService {
       rawMagicToken
     )}`;
 
-    await this.mailer.sendAuthEmail({
+    const mailResult = await this.mailer.sendAuthEmail({
       to: email,
       subject,
       magicLinkUrl,
@@ -360,6 +400,12 @@ export class AuthService {
       contextLabel: subject,
     });
 
-    return { magicToken: rawMagicToken, otpCode: rawOtp };
+    return {
+      magicToken: rawMagicToken,
+      otpCode: rawOtp,
+      magicLinkUrl,
+      emailSent: mailResult.sent,
+      error: mailResult.error,
+    };
   }
 }

@@ -26,7 +26,7 @@ export const PublisherConsoleLayout: React.FC<{
   onTriggerSync: (opts?: { forceReindex?: boolean }) => Promise<void>;
   onUpdateProject: (data: Partial<ProjectSummary>) => Promise<void>;
   onSaveGroup: (group: Partial<ViewerGroupSummary>) => Promise<void>;
-  onInviteViewer: (email: string, groupIds: string[]) => Promise<void>;
+  onInviteViewer: (email: string, groupIds: string[]) => Promise<any>;
   onBulkInvite: (entries: { email: string; groupIds: string[] }[]) => Promise<void>;
   onRevokeViewer: (userId: string) => Promise<void>;
   onSaveAiConfig: (data: any) => Promise<void>;

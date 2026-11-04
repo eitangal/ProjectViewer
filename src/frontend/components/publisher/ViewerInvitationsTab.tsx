@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { UserPlus, Trash2, Mail, Users, Check, AlertCircle, FileSpreadsheet } from 'lucide-react';
+import { UserPlus, Trash2, Mail, Users, Check, AlertCircle, FileSpreadsheet, Copy } from 'lucide-react';
 import { ViewerGroupSummary, ViewerMembershipSummary } from '@/shared/types.js';
 
 export const ViewerInvitationsTab: React.FC<{
   projectId: string;
   groups: ViewerGroupSummary[];
   viewers: ViewerMembershipSummary[];
-  onInviteViewer: (email: string, groupIds: string[]) => Promise<void>;
+  onInviteViewer: (email: string, groupIds: string[]) => Promise<any>;
   onBulkInvite: (entries: { email: string; groupIds: string[] }[]) => Promise<void>;
   onRevokeViewer: (userId: string) => Promise<void>;
 }> = ({ projectId, groups, viewers, onInviteViewer, onBulkInvite, onRevokeViewer }) => {
@@ -18,6 +18,14 @@ export const ViewerInvitationsTab: React.FC<{
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [bulkCsvText, setBulkCsvText] = useState('');
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [inviteModalData, setInviteModalData] = useState<{
+    email: string;
+    magicLinkUrl: string;
+    otpCode: string;
+    emailSent: boolean;
+  } | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedOtp, setCopiedOtp] = useState(false);
 
   const toggleGroup = (id: string) => {
     setSelectedGroupIds((prev) =>
@@ -32,9 +40,18 @@ export const ViewerInvitationsTab: React.FC<{
     setIsInviting(true);
     setActionMessage(null);
     try {
-      await onInviteViewer(singleEmail.trim(), selectedGroupIds);
+      const res = await onInviteViewer(singleEmail.trim(), selectedGroupIds);
       setSingleEmail('');
-      setActionMessage(`Invitation sent to ${singleEmail}`);
+      if (res && res.magicLinkUrl) {
+        setInviteModalData({
+          email: res.email || singleEmail.trim(),
+          magicLinkUrl: res.magicLinkUrl,
+          otpCode: res.otpCode,
+          emailSent: !!res.emailSent,
+        });
+      } else {
+        setActionMessage(`Invitation sent to ${singleEmail}`);
+      }
     } catch (err: any) {
       setActionMessage(`Error: ${err.message || 'Failed to invite viewer'}`);
     } finally {
@@ -250,6 +267,98 @@ export const ViewerInvitationsTab: React.FC<{
                 className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-medium px-4 py-2 rounded-xl text-xs transition-colors"
               >
                 Send Bulk Invites
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Single Viewer Invite Success Modal */}
+      {inviteModalData && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full flex flex-col gap-4 shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className={`p-2.5 rounded-xl ${inviteModalData.emailSent ? 'bg-emerald-950 text-emerald-400' : 'bg-amber-950 text-amber-400'}`}>
+                {inviteModalData.emailSent ? <Check size={20} /> : <AlertCircle size={20} />}
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-slate-100">
+                  Viewer Invitation Generated
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Invited Viewer: <span className="font-mono text-slate-200">{inviteModalData.email}</span>
+                </p>
+              </div>
+            </div>
+
+            {inviteModalData.emailSent ? (
+              <div className="bg-emerald-950/40 border border-emerald-800/80 rounded-xl p-3 text-xs text-emerald-200">
+                ✅ Invitation email dispatched successfully to recipient inbox.
+              </div>
+            ) : (
+              <div className="bg-amber-950/40 border border-amber-800/80 rounded-xl p-3 text-xs text-amber-200 flex flex-col gap-1">
+                <span className="font-semibold text-amber-300">
+                  ⚠️ SMTP server is not configured.
+                </span>
+                <span>
+                  The invitation was not sent over the internet. You can copy the 1-click Direct Link or 6-digit OTP code below to share directly with the viewer:
+                </span>
+              </div>
+            )}
+
+            {inviteModalData.magicLinkUrl && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-slate-300">1-Click Direct Access Link</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={inviteModalData.magicLinkUrl}
+                    className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 font-mono select-all focus:outline-none"
+                  />
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(inviteModalData.magicLinkUrl);
+                      setCopiedLink(true);
+                      setTimeout(() => setCopiedLink(false), 2000);
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs transition-colors shrink-0"
+                  >
+                    {copiedLink ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                    <span>{copiedLink ? 'Copied' : 'Copy Link'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {inviteModalData.otpCode && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-slate-300">6-Digit Verification Code (OTP)</label>
+                <div className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5">
+                  <span className="font-mono text-base font-bold tracking-widest text-indigo-400">
+                    {inviteModalData.otpCode}
+                  </span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(inviteModalData.otpCode);
+                      setCopiedOtp(true);
+                      setTimeout(() => setCopiedOtp(false), 2000);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs transition-colors"
+                  >
+                    {copiedOtp ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                    <span>{copiedOtp ? 'Copied' : 'Copy Code'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end pt-2">
+              <button
+                onClick={() => setInviteModalData(null)}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-5 py-2 rounded-xl text-xs transition-colors"
+              >
+                Done
               </button>
             </div>
           </div>
