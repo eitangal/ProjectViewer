@@ -23,7 +23,7 @@ export const PublisherConsoleLayout: React.FC<{
   syncLogs: any[];
   onSelectProject: (id: string) => void;
   onCreateProject: (data: { name: string; repoUrl: string; branch?: string }) => Promise<void>;
-  onTriggerSync: () => Promise<void>;
+  onTriggerSync: (opts?: { forceReindex?: boolean }) => Promise<void>;
   onUpdateProject: (data: Partial<ProjectSummary>) => Promise<void>;
   onSaveGroup: (group: Partial<ViewerGroupSummary>) => Promise<void>;
   onInviteViewer: (email: string, groupIds: string[]) => Promise<void>;

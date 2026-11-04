@@ -1,11 +1,21 @@
 import React, { useState } from 'react';
-import { GitBranch, RefreshCw, Copy, Check, GitCommit, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import {
+  RefreshCw,
+  Copy,
+  Check,
+  CheckCircle,
+  AlertCircle,
+  Sparkles,
+  FileCode2,
+  HardDrive,
+  Info,
+} from 'lucide-react';
 import { ProjectSummary } from '@/shared/types.js';
 
 export const SyncAndRepoTab: React.FC<{
   project: ProjectSummary;
   syncLogs: any[];
-  onTriggerSync: () => Promise<void>;
+  onTriggerSync: (opts?: { forceReindex?: boolean }) => Promise<void>;
   onUpdateProject: (data: Partial<ProjectSummary> & { githubPat?: string; webhookSecret?: string }) => Promise<void>;
 }> = ({ project, syncLogs, onTriggerSync, onUpdateProject }) => {
   const [isSyncing, setIsSyncing] = useState(false);
@@ -17,12 +27,16 @@ export const SyncAndRepoTab: React.FC<{
 
   const webhookUrl = `${window.location.origin}/api/webhooks/github/${project.id}`;
 
-  const handleSyncNow = async () => {
+  const handleSync = async (forceReindex = false) => {
     setIsSyncing(true);
     setSyncMessage(null);
     try {
-      await onTriggerSync();
-      setSyncMessage('Sync completed successfully.');
+      await onTriggerSync({ forceReindex });
+      setSyncMessage(
+        forceReindex
+          ? 'Full AI re-indexing completed successfully.'
+          : 'Git delta sync completed successfully.'
+      );
     } catch (err: any) {
       setSyncMessage(`Sync failed: ${err.message || 'Unknown error'}`);
     } finally {
@@ -50,7 +64,7 @@ export const SyncAndRepoTab: React.FC<{
     <div className="flex flex-col gap-6 p-2 max-w-4xl mx-auto">
       {/* Sync Status Card */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-3">
             <h2 className="text-base font-semibold text-slate-100">{project.name}</h2>
             <span
@@ -69,30 +83,84 @@ export const SyncAndRepoTab: React.FC<{
                 : 'Synced & Active'}
             </span>
           </div>
-          <div className="flex items-center gap-4 text-xs text-slate-400 font-mono mt-1">
-            <span>Branch: {project.branch}</span>
-            <span>•</span>
-            <span>
-              HEAD:{' '}
-              {project.lastSyncedSha ? project.lastSyncedSha.slice(0, 7) : 'Not synced yet'}
+
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 font-mono mt-1">
+            <span className="flex items-center gap-1 text-slate-300">
+              Branch: <span className="text-indigo-400 font-semibold">{project.branch}</span>
             </span>
             <span>•</span>
-            <span>Disk: {Math.round(project.diskUsageBytes / 1024)} KB</span>
+            <span>
+              HEAD: <span className="text-indigo-300">{project.lastSyncedSha ? project.lastSyncedSha.slice(0, 7) : 'Not synced yet'}</span>
+            </span>
+            <span>•</span>
+            <span className="flex items-center gap-1 text-emerald-400 font-medium">
+              <FileCode2 size={13} />
+              <span>{project.totalFiles ? `${project.totalFiles} files in Git` : 'Files synced'}</span>
+            </span>
+            <span>•</span>
+            <span className="flex items-center gap-1 text-slate-400">
+              <HardDrive size={13} />
+              <span>{Math.round(project.diskUsageBytes / 1024)} KB</span>
+            </span>
           </div>
+
           {syncMessage && (
-            <p className="text-xs text-indigo-400 mt-2">{syncMessage}</p>
+            <p className="text-xs text-indigo-400 mt-2 font-medium">{syncMessage}</p>
           )}
         </div>
 
-        <button
-          onClick={handleSyncNow}
-          disabled={isSyncing}
-          className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium px-5 py-2.5 rounded-xl transition-colors text-xs flex items-center gap-2 shadow-lg shadow-indigo-600/20 shrink-0"
-        >
-          <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
-          <span>{isSyncing ? 'Syncing...' : 'Trigger Delta Sync'}</span>
-        </button>
+        <div className="flex items-center gap-2.5 shrink-0">
+          <button
+            onClick={() => handleSync(false)}
+            disabled={isSyncing}
+            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium px-4 py-2.5 rounded-xl transition-colors text-xs flex items-center gap-2 shadow-lg shadow-indigo-600/20"
+          >
+            <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+            <span>{isSyncing ? 'Syncing...' : 'Trigger Git Sync'}</span>
+          </button>
+
+          {project.hasGeminiKey && (
+            <button
+              onClick={() => handleSync(true)}
+              disabled={isSyncing}
+              title="Forces full re-indexing of all repository files into Gemini vector embeddings"
+              className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 border border-slate-700 font-medium px-3.5 py-2.5 rounded-xl transition-colors text-xs flex items-center gap-1.5"
+            >
+              <Sparkles size={14} className="text-amber-400" />
+              <span>Full AI Re-Index</span>
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Transparent Information Banner explaining Git vs AI Indexing */}
+      {!project.hasGeminiKey ? (
+        <div className="bg-sky-950/30 border border-sky-800/60 rounded-2xl p-5 flex items-start gap-3.5 text-xs text-sky-200 shadow-md">
+          <Info className="text-sky-400 shrink-0 mt-0.5" size={18} />
+          <div className="flex flex-col gap-1.5">
+            <span className="font-semibold text-sky-100 text-sm">
+              Git Repository is Fully Synced ({project.totalFiles || 'All'} files ready to view)
+            </span>
+            <p className="text-sky-300/80 leading-relaxed">
+              All files from your repository are downloaded, authenticated, and ready to browse in the Viewer Portal subject to your ACL rules.
+              The sync history column displays <code className="bg-sky-900/60 px-1 py-0.5 rounded text-sky-200 font-mono">0 files</code> under <strong>AI Vector Indexing</strong> because a Google Gemini API Key is not yet configured.
+              To enable AI Semantic Q&A and document vector search, provide your Gemini API key in the <strong>Gemini BYOK & AI Settings</strong> tab.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-emerald-950/30 border border-emerald-800/60 rounded-2xl p-5 flex items-start gap-3.5 text-xs text-emerald-200 shadow-md">
+          <CheckCircle className="text-emerald-400 shrink-0 mt-0.5" size={18} />
+          <div className="flex flex-col gap-1.5">
+            <span className="font-semibold text-emerald-100 text-sm">
+              Gemini AI Semantic Vector Indexing Active
+            </span>
+            <p className="text-emerald-300/80 leading-relaxed">
+              Your repository documents are vectorized with Gemini (<span className="font-mono text-emerald-200">{project.geminiEmbeddingModel}</span>). Viewers can use the AI RAG Assistant drawer with strict ACL-filtered citation boundaries.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* GitHub Configuration Card */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col gap-5">
@@ -181,7 +249,13 @@ export const SyncAndRepoTab: React.FC<{
 
       {/* Sync History Logs Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col gap-4">
-        <h3 className="text-sm font-semibold text-slate-100">Delta Sync History</h3>
+        <div>
+          <h3 className="text-sm font-semibold text-slate-100">Git & AI Sync History</h3>
+          <p className="text-xs text-slate-400 mt-1">
+            Tracks commit delta fetches and incremental AI vector embeddings generation.
+          </p>
+        </div>
+
         {syncLogs.length === 0 ? (
           <p className="text-xs text-slate-500">No sync events recorded yet.</p>
         ) : (
@@ -189,26 +263,34 @@ export const SyncAndRepoTab: React.FC<{
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-800 text-slate-400">
-                  <th className="py-2 px-3 font-medium">Trigger</th>
-                  <th className="py-2 px-3 font-medium">Old Commit</th>
-                  <th className="py-2 px-3 font-medium">New Commit</th>
-                  <th className="py-2 px-3 font-medium">Indexed</th>
-                  <th className="py-2 px-3 font-medium">Duration</th>
-                  <th className="py-2 px-3 font-medium">Status</th>
-                  <th className="py-2 px-3 font-medium">Time</th>
+                  <th className="py-2.5 px-3 font-medium">Trigger</th>
+                  <th className="py-2.5 px-3 font-medium">Commit SHA</th>
+                  <th className="py-2.5 px-3 font-medium">Git Repo Files</th>
+                  <th className="py-2.5 px-3 font-medium">AI Vectors (BYOK)</th>
+                  <th className="py-2.5 px-3 font-medium">Duration</th>
+                  <th className="py-2.5 px-3 font-medium">Status</th>
+                  <th className="py-2.5 px-3 font-medium">Time</th>
                 </tr>
               </thead>
               <tbody>
                 {syncLogs.map((log) => (
                   <tr key={log.id} className="border-b border-slate-800/60 font-mono text-[11px]">
                     <td className="py-2.5 px-3 text-slate-300">{log.trigger_type}</td>
-                    <td className="py-2.5 px-3 text-slate-500">
-                      {log.old_sha ? log.old_sha.slice(0, 7) : '—'}
+                    <td className="py-2.5 px-3 text-indigo-400 font-semibold">
+                      {log.new_sha ? log.new_sha.slice(0, 7) : log.old_sha ? log.old_sha.slice(0, 7) : '—'}
                     </td>
-                    <td className="py-2.5 px-3 text-indigo-400">
-                      {log.new_sha ? log.new_sha.slice(0, 7) : '—'}
+                    <td className="py-2.5 px-3 text-emerald-400 font-medium">
+                      {log.total_files ? `${log.total_files} files` : project.totalFiles ? `${project.totalFiles} files` : 'Synced'}
                     </td>
-                    <td className="py-2.5 px-3 text-slate-300">{log.indexed_files} files</td>
+                    <td className="py-2.5 px-3">
+                      {log.indexed_files > 0 ? (
+                        <span className="text-sky-300 font-semibold">{log.indexed_files} files indexed</span>
+                      ) : (
+                        <span className="text-slate-500">
+                          0 files {!project.hasGeminiKey ? '(BYOK idle)' : '(no changes)'}
+                        </span>
+                      )}
+                    </td>
                     <td className="py-2.5 px-3 text-slate-400">{log.duration_ms}ms</td>
                     <td className="py-2.5 px-3">
                       {log.status === 'SUCCESS' ? (

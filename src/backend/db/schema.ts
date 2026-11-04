@@ -48,6 +48,7 @@ export function initSchema(db: Database.Database): void {
       sync_status TEXT NOT NULL DEFAULT 'IDLE', -- 'IDLE' | 'SYNCING' | 'ERROR'
       last_sync_error TEXT,
       disk_usage_bytes INTEGER NOT NULL DEFAULT 0,
+      total_files INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
     );
 
@@ -109,6 +110,7 @@ export function initSchema(db: Database.Database): void {
       trigger_type TEXT NOT NULL, -- 'MANUAL' | 'WEBHOOK' | 'SCHEDULED'
       old_sha TEXT,
       new_sha TEXT,
+      total_files INTEGER NOT NULL DEFAULT 0,
       indexed_files INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL,       -- 'SUCCESS' | 'ERROR'
       error_message TEXT,
@@ -139,4 +141,12 @@ export function initSchema(db: Database.Database): void {
       created_at INTEGER NOT NULL
     );
   `);
+
+  // Safe migrations for backwards-compatible schema evolutions
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN total_files INTEGER NOT NULL DEFAULT 0;`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE sync_logs ADD COLUMN total_files INTEGER NOT NULL DEFAULT 0;`);
+  } catch {}
 }

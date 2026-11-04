@@ -59,6 +59,8 @@ export interface ProjectSummary {
   syncStatus: 'IDLE' | 'SYNCING' | 'ERROR';
   lastSyncError: string | null;
   diskUsageBytes: number;
+  totalFiles: number;
+  indexedFiles?: number;
   createdAt: number;
 }
 

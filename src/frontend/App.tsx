@@ -284,9 +284,13 @@ export function MainApp() {
           await refetchProjects();
           setProjectId(json.projectId);
         }}
-        onTriggerSync={async () => {
+        onTriggerSync={async (opts) => {
           if (!activeProject) return;
-          const res = await fetch(`/api/projects/${activeProject.id}/sync`, { method: 'POST' });
+          const res = await fetch(`/api/projects/${activeProject.id}/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(opts || {}),
+          });
           const json = await res.json();
           if (!res.ok) throw new Error(json.error);
           refetchProjects();

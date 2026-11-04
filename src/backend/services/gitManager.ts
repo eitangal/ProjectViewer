@@ -77,7 +77,23 @@ export class BareGitManager {
   }
 
   /**
+   * Clears the in-memory file cache for a project or for all projects.
+   */
+  public clearCache(projectId?: string): void {
+    if (projectId) {
+      for (const key of this.fileCache.keys()) {
+        if (key.startsWith(`${projectId}:`)) {
+          this.fileCache.delete(key);
+        }
+      }
+    } else {
+      this.fileCache.clear();
+    }
+  }
+
+  /**
    * Lists all files and their byte sizes in a commit tree (`git ls-tree -r -l`).
+   * Explicitly sets core.quotePath=false so UTF-8 / Hebrew paths are unescaped and unquoted.
    */
   public async listRepoFiles(projectId: string, commitSha: string): Promise<RepoFileEntry[]> {
     const cacheKey = `${projectId}:${commitSha}`;
@@ -88,7 +104,7 @@ export class BareGitManager {
     const repoDir = this.getRepoDir(projectId);
     const { stdout } = await execFileAsync(
       'git',
-      ['ls-tree', '-r', '-l', '--full-tree', commitSha],
+      ['-c', 'core.quotePath=false', 'ls-tree', '-r', '-l', '--full-tree', commitSha],
       { cwd: repoDir, maxBuffer: 25 * 1024 * 1024 }
     );
 
@@ -96,8 +112,13 @@ export class BareGitManager {
     for (const line of stdout.split('\n')) {
       if (!line.trim()) continue;
       // Format: "<mode> <type> <object> <size>\t<file>"
-      const [meta, filePath] = line.split('\t');
+      let [meta, filePath] = line.split('\t');
       if (!meta || !filePath) continue;
+
+      filePath = filePath.trim();
+      if (filePath.startsWith('"') && filePath.endsWith('"')) {
+        filePath = filePath.slice(1, -1);
+      }
 
       const parts = meta.trim().split(/\s+/);
       const type = parts[1];
@@ -114,6 +135,7 @@ export class BareGitManager {
   /**
    * Computes changed files between two commits (`git diff --name-status`).
    * If oldSha is null (initial sync), treats all files in newSha as Added ('A').
+   * Explicitly sets core.quotePath=false so UTF-8 / Hebrew paths are unescaped and unquoted.
    */
   public async getCommitDelta(
     projectId: string,
@@ -130,15 +152,21 @@ export class BareGitManager {
     try {
       const { stdout } = await execFileAsync(
         'git',
-        ['diff', '--name-status', '--no-renames', oldSha, newSha],
+        ['-c', 'core.quotePath=false', 'diff', '--name-status', '--no-renames', oldSha, newSha],
         { cwd: repoDir, maxBuffer: 25 * 1024 * 1024 }
       );
 
       const deltas: FileDelta[] = [];
       for (const line of stdout.split('\n')) {
         if (!line.trim()) continue;
-        const [rawStatus, filePath] = line.split('\t');
+        let [rawStatus, filePath] = line.split('\t');
         if (!rawStatus || !filePath) continue;
+
+        filePath = filePath.trim();
+        if (filePath.startsWith('"') && filePath.endsWith('"')) {
+          filePath = filePath.slice(1, -1);
+        }
+
         const statusChar = rawStatus.trim()[0] as 'A' | 'M' | 'D';
         if (['A', 'M', 'D'].includes(statusChar) && filePath) {
           deltas.push({ status: statusChar, filePath });
@@ -163,7 +191,7 @@ export class BareGitManager {
     const repoDir = this.getRepoDir(projectId);
     const { stdout } = await execFileAsync(
       'git',
-      ['cat-file', 'blob', `${commitSha}:${filePath}`],
+      ['-c', 'core.quotePath=false', 'cat-file', 'blob', `${commitSha}:${filePath}`],
       { cwd: repoDir, maxBuffer: 15 * 1024 * 1024 }
     );
     return stdout;

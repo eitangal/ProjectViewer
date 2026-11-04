@@ -32,10 +32,12 @@ export class ProjectSyncAndRagOrchestrator {
    */
   public async syncProject(
     projectId: string,
-    triggerType: 'MANUAL' | 'WEBHOOK' | 'SCHEDULED' = 'MANUAL'
+    triggerType: 'MANUAL' | 'WEBHOOK' | 'SCHEDULED' = 'MANUAL',
+    options?: { forceReindex?: boolean }
   ): Promise<{
     oldSha: string | null;
     newSha: string;
+    totalFiles: number;
     indexedFiles: number;
     durationMs: number;
   }> {
@@ -72,6 +74,11 @@ export class ProjectSyncAndRagOrchestrator {
         githubPat
       );
 
+      // Clear cache and count total files in HEAD commit
+      this.gitManager.clearCache(projectId);
+      const allRepoFiles = await this.gitManager.listRepoFiles(projectId, newSha);
+      const totalFiles = allRepoFiles.length;
+
       // Check repo disk usage against publisher quota
       const diskBytes = await this.gitManager.getRepoDiskUsageBytes(projectId);
       if (owner && diskBytes > owner.max_disk_quota_bytes) {
@@ -84,11 +91,25 @@ export class ProjectSyncAndRagOrchestrator {
       let indexedFiles = 0;
 
       // 2. Compute file delta between oldSha and newSha
-      const deltas = await this.gitManager.getCommitDelta(
-        projectId,
-        oldSha,
-        newSha
-      );
+      let deltas: { status: 'A' | 'M' | 'D'; filePath: string }[] = [];
+      if (options?.forceReindex || !oldSha) {
+        deltas = allRepoFiles.map((f) => ({ status: 'A' as const, filePath: f.filePath }));
+      } else {
+        deltas = await this.gitManager.getCommitDelta(
+          projectId,
+          oldSha,
+          newSha
+        );
+      }
+
+      // If user provided a Gemini key and no chunks exist yet, auto-trigger indexing for all files
+      const existingChunkCount = (this.db
+        .prepare(`SELECT COUNT(*) as cnt FROM doc_chunks WHERE project_id = ?`)
+        .get(projectId) as any)?.cnt ?? 0;
+
+      if (geminiKey && existingChunkCount === 0 && deltas.length === 0) {
+        deltas = allRepoFiles.map((f) => ({ status: 'A' as const, filePath: f.filePath }));
+      }
 
       // 3. If Publisher provided a Gemini API key, incrementally update embeddings
       if (geminiKey && deltas.length > 0) {
@@ -174,16 +195,17 @@ export class ProjectSyncAndRagOrchestrator {
           SET last_synced_sha = ?,
               last_synced_at = ?,
               disk_usage_bytes = ?,
+              total_files = ?,
               sync_status = 'IDLE',
               last_sync_error = NULL
           WHERE id = ?
         `)
-        .run(newSha, Date.now(), diskBytes, projectId);
+        .run(newSha, Date.now(), diskBytes, totalFiles, projectId);
 
       this.db
         .prepare(`
-          INSERT INTO sync_logs (id, project_id, trigger_type, old_sha, new_sha, indexed_files, status, error_message, duration_ms, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, 'SUCCESS', NULL, ?, ?)
+          INSERT INTO sync_logs (id, project_id, trigger_type, old_sha, new_sha, total_files, indexed_files, status, error_message, duration_ms, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'SUCCESS', NULL, ?, ?)
         `)
         .run(
           randomUUID(),
@@ -191,12 +213,13 @@ export class ProjectSyncAndRagOrchestrator {
           triggerType,
           oldSha,
           newSha,
+          totalFiles,
           indexedFiles,
           durationMs,
           Date.now()
         );
 
-      return { oldSha, newSha, indexedFiles, durationMs };
+      return { oldSha, newSha, totalFiles, indexedFiles, durationMs };
     } catch (err: any) {
       const durationMs = Date.now() - startTime;
       const errorMsg = err.message || 'Unknown sync error';
@@ -212,8 +235,8 @@ export class ProjectSyncAndRagOrchestrator {
 
       this.db
         .prepare(`
-          INSERT INTO sync_logs (id, project_id, trigger_type, old_sha, new_sha, indexed_files, status, error_message, duration_ms, created_at)
-          VALUES (?, ?, ?, ?, NULL, 0, 'ERROR', ?, ?, ?)
+          INSERT INTO sync_logs (id, project_id, trigger_type, old_sha, new_sha, total_files, indexed_files, status, error_message, duration_ms, created_at)
+          VALUES (?, ?, ?, ?, NULL, 0, 0, 'ERROR', ?, ?, ?)
         `)
         .run(
           randomUUID(),

@@ -57,6 +57,7 @@ export async function registerPublisherRoutes(
       syncStatus: r.sync_status,
       lastSyncError: r.last_sync_error,
       diskUsageBytes: r.disk_usage_bytes,
+      totalFiles: r.total_files ?? 0,
       createdAt: r.created_at,
     }));
 
@@ -204,11 +205,12 @@ export async function registerPublisherRoutes(
   // 6. Trigger Delta Git Sync (PUB-03)
   app.post('/api/projects/:projectId/sync', publisherGuard, async (req, reply) => {
     const { projectId } = req.params as { projectId: string };
+    const { forceReindex } = (req.body as { forceReindex?: boolean }) || {};
     const p = getOwnedProject(projectId, req.user!.sub, req.user!.role);
     if (!p) return reply.code(404).send({ error: 'Project not found' });
 
     try {
-      const syncResult = await syncOrchestrator.syncProject(projectId, 'MANUAL');
+      const syncResult = await syncOrchestrator.syncProject(projectId, 'MANUAL', { forceReindex });
       return reply.send({ ok: true, syncResult });
     } catch (err: any) {
       return reply.code(500).send({ error: err.message || 'Git sync failed' });

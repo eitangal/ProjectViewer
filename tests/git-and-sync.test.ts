@@ -190,4 +190,27 @@ describe('Bare Git Manager & Delta Sync Integration (gitManager.ts & syncWorker.
     // MUST return empty array immediately (Zero-Leakage guarantee)
     expect(zeroResults).toEqual([]);
   });
+
+  it('correctly handles non-ASCII / Hebrew UTF-8 file paths without octal escaping', async () => {
+    const hebrewDir = path.join(sourceRepoDir, 'תוצרים');
+    await fs.mkdir(hebrewDir, { recursive: true });
+    await fs.writeFile(path.join(hebrewDir, 'התוכנית.md'), '# תוכנית עבודה\nפירוט המשימות והשלבים.');
+    await execFileAsync('git', ['add', '.'], { cwd: sourceRepoDir });
+    await execFileAsync('git', ['commit', '-m', 'Add Hebrew files'], { cwd: sourceRepoDir });
+
+    const projectId = 'proj-hebrew';
+    const sha = await gitManager.syncBareRepo(projectId, sourceRepoDir, 'main');
+    const files = await gitManager.listRepoFiles(projectId, sha);
+    const filePaths = files.map((f) => f.filePath);
+
+    expect(filePaths).toContain('תוצרים/התוכנית.md');
+    // Ensure no quotes or octal escapes like \327
+    for (const p of filePaths) {
+      expect(p.startsWith('"')).toBe(false);
+      expect(p).not.toMatch(/\\\d{3}/);
+    }
+
+    const content = await gitManager.readFileBlob(projectId, sha, 'תוצרים/התוכנית.md');
+    expect(content).toContain('תוכנית עבודה');
+  });
 });
