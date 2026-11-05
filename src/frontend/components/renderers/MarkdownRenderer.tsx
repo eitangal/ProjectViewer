@@ -17,9 +17,13 @@ const sanitizeSchema = {
 };
 
 export const MarkdownRenderer: React.FC<{ markdown: string }> = ({ markdown }) => {
-  const { theme } = useViewerStore();
+  const { direction } = useViewerStore();
+
   return (
-    <div className={`prose ${theme === 'dark' ? 'prose-invert text-slate-200' : 'text-slate-800'} prose-indigo max-w-none`}>
+    <div
+      dir={direction}
+      className={`markdown-body w-full max-w-none ${direction === 'rtl' ? 'text-right' : 'text-left'}`}
+    >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}
@@ -39,7 +43,7 @@ export const MarkdownRenderer: React.FC<{ markdown: string }> = ({ markdown }) =
               return (
                 <code
                   dir="ltr"
-                  className="px-1.5 py-0.5 rounded bg-slate-800 text-indigo-300 font-mono text-[13px]"
+                  className="px-1.5 py-0.5 rounded font-mono text-[13px]"
                   {...props}
                 >
                   {children}
@@ -50,7 +54,7 @@ export const MarkdownRenderer: React.FC<{ markdown: string }> = ({ markdown }) =
             return (
               <pre
                 dir="ltr"
-                className="my-4 p-4 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 font-mono text-xs overflow-x-auto text-left"
+                className="my-4 p-4 rounded-xl font-mono text-xs overflow-x-auto text-left"
               >
                 <code dir="ltr" className={className} {...props}>
                   {codeString}
@@ -61,7 +65,7 @@ export const MarkdownRenderer: React.FC<{ markdown: string }> = ({ markdown }) =
           table({ children }) {
             return (
               <div className="my-6 overflow-x-auto rounded-xl border border-slate-800">
-                <table className="w-full border-collapse text-left text-sm text-slate-300">
+                <table className="w-full border-collapse text-start text-sm">
                   {children}
                 </table>
               </div>
@@ -69,21 +73,21 @@ export const MarkdownRenderer: React.FC<{ markdown: string }> = ({ markdown }) =
           },
           th({ children }) {
             return (
-              <th className="border-b border-slate-800 bg-slate-900/80 px-4 py-2.5 font-semibold text-slate-200">
+              <th className="border-b border-slate-800 px-4 py-2.5 font-semibold text-start">
                 {children}
               </th>
             );
           },
           td({ children }) {
             return (
-              <td className="border-b border-slate-800/60 px-4 py-2.5">
+              <td className="border-b border-slate-800/60 px-4 py-2.5 text-start">
                 {children}
               </td>
             );
           },
           blockquote({ children }) {
             return (
-              <blockquote className="border-s-4 border-indigo-500 bg-indigo-950/20 px-4 py-2 rounded-e-xl my-4 text-slate-300 italic">
+              <blockquote className="border-s-4 border-indigo-500 my-4 text-start italic">
                 {children}
               </blockquote>
             );

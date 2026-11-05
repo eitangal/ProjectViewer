@@ -12,26 +12,24 @@ interface ToastMessage {
 export const ViewerWorkspaceLayout: React.FC<{
   projectName?: string;
   isAiEnabled?: boolean;
+  projectRole?: 'PUBLISHER' | 'VIEWER';
   user?: { email: string; role?: string; globalRole?: string } | null;
   onLogout?: () => void;
   children: React.ReactNode;
 }> = ({
   projectName = 'Project Portal',
   isAiEnabled = true,
+  projectRole,
   user,
   onLogout,
   children,
 }) => {
   const {
-    direction,
-    setDirection,
     isSidebarOpen,
     toggleSidebar,
     isAiDrawerOpen,
     toggleAiDrawer,
     isAiDrawerMaximized,
-    viewMode,
-    setViewMode,
     activeFilePath,
   } = useViewerStore();
 
@@ -57,7 +55,7 @@ export const ViewerWorkspaceLayout: React.FC<{
 
   return (
     <div
-      dir={direction}
+      dir="ltr"
       className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 text-slate-100"
     >
       {/* Top Navigation Bar */}
@@ -76,6 +74,18 @@ export const ViewerWorkspaceLayout: React.FC<{
           <span className="font-semibold text-sm tracking-wide text-slate-200 shrink-0">
             {projectName}
           </span>
+
+          {projectRole && (
+            <span
+              className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border shrink-0 ${
+                projectRole === 'PUBLISHER'
+                  ? 'bg-indigo-950/80 text-indigo-300 border-indigo-800/60'
+                  : 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60'
+              }`}
+            >
+              {projectRole === 'PUBLISHER' ? 'Publisher' : 'Viewer'}
+            </span>
+          )}
 
           {/* Interactive Breadcrumbs */}
           {pathParts.length > 0 && (
@@ -99,58 +109,8 @@ export const ViewerWorkspaceLayout: React.FC<{
           )}
         </div>
 
-        {/* Right Toolbar Controls */}
+        {/* Right Toolbar Controls: Formatted/Raw and RTL/LTR removed from header; only AI chat and initials avatar */}
         <div className="flex items-center gap-2 md:gap-2.5 shrink-0">
-          {/* Formatted vs Raw Segmented Control */}
-          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-            <button
-              onClick={() => setViewMode('formatted')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
-                viewMode === 'formatted'
-                  ? 'bg-indigo-600 text-white font-medium shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <FileText size={13} />
-              <span className="hidden md:inline">Formatted</span>
-            </button>
-            <button
-              onClick={() => setViewMode('raw')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
-                viewMode === 'raw'
-                  ? 'bg-indigo-600 text-white font-medium shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Code size={13} />
-              <span className="hidden md:inline">Raw Code</span>
-            </button>
-          </div>
-
-          {/* Bi-Directional (LTR / RTL) Switcher */}
-          <div className="hidden sm:flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-mono">
-            <button
-              onClick={() => setDirection('ltr')}
-              className={`px-2 py-1 rounded-lg transition-all ${
-                direction === 'ltr'
-                  ? 'bg-slate-800 text-slate-100 font-medium'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              LTR
-            </button>
-            <button
-              onClick={() => setDirection('rtl')}
-              className={`px-2 py-1 rounded-lg transition-all ${
-                direction === 'rtl'
-                  ? 'bg-slate-800 text-slate-100 font-medium'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              RTL
-            </button>
-          </div>
-
           {/* AI Drawer Toggle */}
           {isAiEnabled && (
             <button
@@ -174,9 +134,7 @@ export const ViewerWorkspaceLayout: React.FC<{
             </button>
           )}
 
-          <div className="h-4 w-px bg-slate-800 mx-0.5 hidden sm:block" />
-
-          {/* Theme Toggle, User Display & Logout */}
+          {/* User Initials Avatar & Popover Menu */}
           <ThemeAndUserControls
             user={user}
             onLogout={onLogout}

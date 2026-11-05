@@ -9,6 +9,7 @@ import {
   FileCode2,
   HardDrive,
   Info,
+  Trash2,
 } from 'lucide-react';
 import { ProjectSummary } from '@/shared/types.js';
 
@@ -17,7 +18,8 @@ export const SyncAndRepoTab: React.FC<{
   syncLogs: any[];
   onTriggerSync: (opts?: { forceReindex?: boolean }) => Promise<void>;
   onUpdateProject: (data: Partial<ProjectSummary> & { githubPat?: string; webhookSecret?: string }) => Promise<void>;
-}> = ({ project, syncLogs, onTriggerSync, onUpdateProject }) => {
+  onDeleteProject?: () => void;
+}> = ({ project, syncLogs, onTriggerSync, onUpdateProject, onDeleteProject }) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
@@ -313,6 +315,26 @@ export const SyncAndRepoTab: React.FC<{
           </div>
         )}
       </div>
+
+      {/* Danger Zone: Delete Project */}
+      {onDeleteProject && (
+        <div className="bg-rose-950/20 border border-rose-900/40 rounded-2xl p-6 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-rose-300">Danger Zone</h3>
+            <p className="text-xs text-rose-400/80 mt-1">
+              Permanently remove this project, repository sync logs, ACL viewer groups, and permissions.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onDeleteProject}
+            className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-medium rounded-xl text-xs transition-colors shrink-0 flex items-center gap-1.5 shadow-sm"
+          >
+            <Trash2 size={14} />
+            <span>Delete Project</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };

@@ -95,12 +95,43 @@ npm run build
 
 ---
 
-## 🐳 Docker Deployment
+## 🐳 Production Deployment & Service Lifecycle
 
-The application includes a production-ready `Dockerfile`, `docker-compose.yml`, and `Caddyfile` for automated HTTPS and reverse proxying:
+GitLens-Portal runs as an autonomous production stack on Linux supervised by `systemd`, guaranteeing persistence across VM reboots, automated health recovery, and independent lifecycle control:
+
+### 🛠️ Standalone Management Scripts (`scripts/`)
+
+All scripts operate independently of any IDE or Antigravity process and can be invoked from any shell or cron job:
 
 ```bash
-docker compose up -d --build
+# Start production service & verify health
+./scripts/start.sh
+
+# Stop production service gracefully
+./scripts/stop.sh
+
+# Restart stack & validate healthcheck
+./scripts/restart.sh
+
+# Comprehensive status dashboard (systemd, docker, health, ports, database)
+./scripts/status.sh
+
+# Follow live container logs
+./scripts/logs.sh
+
+# Zero-downtime, safe upgrade (auto-backup DB, pull git, rebuild, verify health)
+./scripts/upgrade.sh
+```
+
+### ⚙️ Systemd Service Unit (`gitlens-portal.service`)
+
+The systemd service unit `/etc/systemd/system/gitlens-portal.service` is enabled on boot (`multi-user.target`), automatically starting after Docker and network initialization:
+
+```bash
+sudo systemctl status gitlens-portal.service
+sudo systemctl start gitlens-portal.service
+sudo systemctl stop gitlens-portal.service
+sudo systemctl restart gitlens-portal.service
 ```
 
 ---

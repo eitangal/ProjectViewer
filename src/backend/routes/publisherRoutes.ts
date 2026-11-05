@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs/promises';
 import { AuthService } from '../auth/authService.js';
 import { buildAuthMiddlewares } from '../auth/authMiddleware.js';
 import { ProjectSyncAndRagOrchestrator } from '../workers/syncWorker.js';
@@ -27,21 +28,40 @@ export async function registerPublisherRoutes(
     return project;
   }
 
-  // 1. List Projects for Publisher
-  app.get('/api/projects', publisherGuard, async (req, reply) => {
+  // 1. List Projects for Current User (Both Published & Viewer Memberships)
+  app.get('/api/projects', { preHandler: [middlewares.requireAuth] }, async (req, reply) => {
+    const userId = req.user!.sub;
     const isSysAdmin = req.user!.role === 'SYSADMIN';
-    const sql = isSysAdmin
-      ? `SELECT * FROM projects ORDER BY created_at DESC`
-      : `SELECT * FROM projects WHERE owner_id = ? ORDER BY created_at DESC`;
 
-    const rows = isSysAdmin
-      ? db.prepare(sql).all() as any[]
-      : db.prepare(sql).all(req.user!.sub) as any[];
+    let rows: any[] = [];
+    if (isSysAdmin) {
+      rows = db.prepare(`SELECT *, 'PUBLISHER' as user_project_role FROM projects ORDER BY created_at DESC`).all() as any[];
+    } else {
+      // 1. Projects owned by user (Publisher role)
+      const ownedProjects = db.prepare(`
+        SELECT *, 'PUBLISHER' as user_project_role
+        FROM projects
+        WHERE owner_id = ?
+        ORDER BY created_at DESC
+      `).all(userId) as any[];
+
+      // 2. Projects where user is in viewer_groups via user_group_memberships (and not owner)
+      const viewerProjects = db.prepare(`
+        SELECT DISTINCT p.*, 'VIEWER' as user_project_role
+        FROM projects p
+        JOIN user_group_memberships ugm ON ugm.project_id = p.id
+        WHERE ugm.user_id = ? AND p.owner_id != ?
+        ORDER BY p.created_at DESC
+      `).all(userId, userId) as any[];
+
+      rows = [...ownedProjects, ...viewerProjects];
+    }
 
     const projects = rows.map((r) => ({
       id: r.id,
       name: r.name,
       ownerId: r.owner_id,
+      userRole: r.user_project_role as 'PUBLISHER' | 'VIEWER',
       repoUrl: r.repo_url,
       branch: r.branch,
       hasGithubPat: !!r.encrypted_github_pat,
@@ -197,6 +217,13 @@ export async function registerPublisherRoutes(
     const { projectId } = req.params as { projectId: string };
     const p = getOwnedProject(projectId, req.user!.sub, req.user!.role);
     if (!p) return reply.code(404).send({ error: 'Project not found' });
+
+    gitManager.clearCache(projectId);
+    try {
+      await fs.rm(gitManager.getRepoDir(projectId), { recursive: true, force: true });
+    } catch {
+      // ignore if folder does not exist
+    }
 
     db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId);
     return reply.send({ ok: true });

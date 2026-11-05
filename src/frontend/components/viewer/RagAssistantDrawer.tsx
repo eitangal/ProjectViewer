@@ -1,7 +1,60 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, Send, X, FileText, Loader2, Maximize2, Minimize2 } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {
+  Sparkles,
+  Send,
+  X,
+  FileText,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  Trash2,
+  Copy,
+  Check,
+} from 'lucide-react';
 import { useViewerStore } from '../../store/useViewerStore.js';
 import { RagChatMessage } from '@/shared/types.js';
+
+const INITIAL_MESSAGES: RagChatMessage[] = [
+  {
+    role: 'assistant',
+    content:
+      'Hello! I am your ACL-scoped Project AI assistant. Ask questions about this repository and I will answer strictly using your permitted files, with inline citations.',
+  },
+];
+
+const ChatCodeBlock: React.FC<{ language?: string; code: string }> = ({ language, code }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div
+      dir="ltr"
+      className="my-2.5 rounded-xl border border-slate-800 bg-slate-950 text-left font-mono overflow-hidden shadow-sm"
+    >
+      <div className="flex items-center justify-between px-3 py-1 bg-slate-900 border-b border-slate-800 text-[11px] text-slate-400">
+        <span className="font-semibold">{language || 'code'}</span>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-200 transition-colors"
+          title="Copy code snippet"
+        >
+          {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+          <span>{copied ? 'Copied' : 'Copy'}</span>
+        </button>
+      </div>
+      <pre className="p-3 overflow-x-auto text-xs leading-relaxed text-slate-200 m-0">
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+};
 
 export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId }) => {
   const {
@@ -9,7 +62,6 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
     toggleAiDrawer,
     navigateToFile,
     previewGroupId,
-    direction,
     isSidebarOpen,
     aiDrawerWidth,
     setAiDrawerWidth,
@@ -18,16 +70,11 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
     toggleAiDrawerMaximized,
   } = useViewerStore();
 
-  const [messages, setMessages] = useState<RagChatMessage[]>([
-    {
-      role: 'assistant',
-      content:
-        'Hello! I am your ACL-scoped Project AI assistant. Ask questions about this repository and I will answer strictly using your permitted files, with inline citations.',
-    },
-  ]);
+  const [messages, setMessages] = useState<RagChatMessage[]>(INITIAL_MESSAGES);
   const [inputQuestion, setInputQuestion] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const asideRef = useRef<HTMLElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -67,14 +114,14 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
 
     const onMouseMove = (e: MouseEvent) => {
       const { startX, startWidth, containerWidth } = dragStartRef.current;
-      // In LTR: dragging left (startX - e.clientX > 0) widens the drawer
-      // In RTL: dragging right (e.clientX - startX > 0) widens the drawer
-      const delta = direction === 'rtl' ? e.clientX - startX : startX - e.clientX;
+      // Since shell is strictly LTR, the drawer is anchored on the right edge
+      // Dragging mouse to the left (startX - e.clientX > 0) widens the drawer
+      const delta = startX - e.clientX;
       const maxWorkareaWidth = Math.max(320, containerWidth - (isSidebarOpen ? 288 : 0));
       const minWidth = 320;
       const targetWidth = startWidth + delta;
 
-      // If dragged to within 20px of full workarea width or past it, snap to maximized
+      // Snap to full width if within 20px
       if (targetWidth >= maxWorkareaWidth - 20) {
         if (!useViewerStore.getState().isAiDrawerMaximized) {
           setAiDrawerMaximized(true);
@@ -104,7 +151,7 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
       document.body.style.cursor = prevCursor;
       document.body.style.userSelect = prevUserSelect;
     };
-  }, [isDragging, direction, isSidebarOpen, setAiDrawerMaximized, setAiDrawerWidth]);
+  }, [isDragging, isSidebarOpen, setAiDrawerMaximized, setAiDrawerWidth]);
 
   // Keyboard navigation for resizing
   const handleKeyDownOnResizeHandle = (e: React.KeyboardEvent) => {
@@ -115,30 +162,16 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
 
     if (e.key === 'ArrowLeft') {
       e.preventDefault();
-      if (direction === 'rtl') {
-        setAiDrawerMaximized(false);
-        setAiDrawerWidth(Math.max(320, aiDrawerWidth - step));
+      const next = aiDrawerWidth + step;
+      if (next >= maxWorkareaWidth - 20) {
+        setAiDrawerMaximized(true);
       } else {
-        const next = aiDrawerWidth + step;
-        if (next >= maxWorkareaWidth - 20) {
-          setAiDrawerMaximized(true);
-        } else {
-          setAiDrawerWidth(next);
-        }
+        setAiDrawerWidth(next);
       }
     } else if (e.key === 'ArrowRight') {
       e.preventDefault();
-      if (direction === 'rtl') {
-        const next = aiDrawerWidth + step;
-        if (next >= maxWorkareaWidth - 20) {
-          setAiDrawerMaximized(true);
-        } else {
-          setAiDrawerWidth(next);
-        }
-      } else {
-        setAiDrawerMaximized(false);
-        setAiDrawerWidth(Math.max(320, aiDrawerWidth - step));
-      }
+      setAiDrawerMaximized(false);
+      setAiDrawerWidth(Math.max(320, aiDrawerWidth - step));
     } else if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       toggleAiDrawerMaximized();
@@ -160,7 +193,14 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
     navigateToFile(filePath, hash);
   };
 
-  if (!isAiDrawerOpen) return null;
+  const handleClearChat = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsStreaming(false);
+    setMessages(INITIAL_MESSAGES);
+  };
 
   const handleSend = async () => {
     if (!inputQuestion.trim() || isStreaming) return;
@@ -173,12 +213,16 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
     // Placeholder for incoming streaming assistant message
     setMessages((prev) => [...prev, { role: 'assistant', content: '', citations: [] }]);
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       const chatUrl = `/api/viewer/${projectId}/rag/chat${previewGroupId ? `?previewGroupId=${previewGroupId}` : ''}`;
       const response = await fetch(chatUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: userText, previewGroupId }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -233,6 +277,9 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
         }
       }
     } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return; // Chat was cleared or aborted intentionally
+      }
       setMessages((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
@@ -243,48 +290,21 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
       });
     } finally {
       setIsStreaming(false);
+      abortControllerRef.current = null;
     }
   };
 
   /**
-   * Parses inline citations like [docs/arch/overview.md#L12-L40] or [specs/auth.yaml]
-   * and renders clickable buttons.
+   * Pre-transforms bracketed citations like [docs/arch/overview.md#L12-L40]
+   * into custom markdown links [docs/arch/overview.md#L12-L40](cite:docs/arch/overview.md#L12-L40)
+   * so ReactMarkdown can render them as interactive citation buttons.
    */
-  const renderMessageContent = (content: string) => {
-    const citationRegex = /\[([^\[\]\s]+\.[a-zA-Z0-9]+(?:#L\d+(?:-L\d+)?)?)\]/g;
-    const parts: React.ReactNode[] = [];
-    let lastIndex = 0;
-    let match;
-
-    while ((match = citationRegex.exec(content)) !== null) {
-      if (match.index > lastIndex) {
-        parts.push(content.slice(lastIndex, match.index));
-      }
-
-      const rawRef = match[1];
-      const [filePath, hash] = rawRef.split('#');
-
-      parts.push(
-        <button
-          key={match.index}
-          onClick={() => handleCitationClick(filePath, hash || null)}
-          className="inline-flex items-center gap-1 mx-1 px-1.5 py-0.5 rounded-md bg-indigo-950/80 border border-indigo-700/80 text-indigo-300 font-mono text-[11px] hover:bg-indigo-900 transition-colors align-baseline"
-          title={`Open ${filePath}${hash ? ` at ${hash}` : ''}`}
-        >
-          <FileText size={10} className="shrink-0 text-indigo-400" />
-          <span className="truncate max-w-[180px]">{rawRef}</span>
-        </button>
-      );
-
-      lastIndex = match.index + match[0].length;
-    }
-
-    if (lastIndex < content.length) {
-      parts.push(content.slice(lastIndex));
-    }
-
-    return parts;
+  const formatMarkdownCitations = (content: string) => {
+    const citationRegex = /\[([^\[\]\s]+\.[a-zA-Z0-9]+(?:#L\d+(?:-L\d+)?)?)\](?!\()/g;
+    return content.replace(citationRegex, '[$1](cite:$1)');
   };
+
+  if (!isAiDrawerOpen) return null;
 
   return (
     <>
@@ -296,6 +316,7 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
       <aside
         ref={asideRef}
         aria-label="Project AI Assistant Panel"
+        dir="ltr"
         className={`border-s border-slate-800 bg-slate-900/95 backdrop-blur-md flex flex-col h-full z-20 shadow-2xl relative ${
           isAiDrawerMaximized ? 'flex-1 w-full min-w-0' : 'shrink-0'
         }`}
@@ -328,10 +349,10 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
         </div>
 
         {/* Header */}
-        <div className="h-12 border-b border-slate-800 px-4 flex items-center justify-between shrink-0">
+        <div className="h-14 border-b border-slate-800 px-4 flex items-center justify-between shrink-0 bg-slate-900">
           <div className="flex items-center gap-2 text-indigo-400 font-medium text-xs min-w-0">
-            <Sparkles size={15} className="shrink-0" />
-            <span className="truncate">Project AI Assistant</span>
+            <Sparkles size={16} className="shrink-0" />
+            <span className="truncate font-semibold text-slate-200">Project AI Assistant</span>
             {isAiDrawerMaximized && (
               <span className="ms-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-950 text-indigo-300 border border-indigo-700/80 shrink-0">
                 Full Workarea
@@ -340,8 +361,21 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            {/* Clear Chat Button */}
+            <button
+              type="button"
+              onClick={handleClearChat}
+              disabled={isStreaming || (messages.length <= 1 && !messages[0].citations?.length)}
+              title="Clear chat history"
+              aria-label="Clear chat history"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 disabled:opacity-30 disabled:hover:text-slate-400 disabled:hover:bg-transparent transition-colors"
+            >
+              <Trash2 size={15} />
+            </button>
+
             {/* Widen to Full Workarea Width / Restore Normal Width Button */}
             <button
+              type="button"
               onClick={toggleAiDrawerMaximized}
               title={
                 isAiDrawerMaximized
@@ -364,6 +398,7 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
 
             {/* Close Button */}
             <button
+              type="button"
               onClick={toggleAiDrawer}
               title="Close Assistant"
               aria-label="Close Assistant"
@@ -385,38 +420,126 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
                 }`}
               >
                 <div
-                  className={`p-3 rounded-2xl max-w-[92%] leading-relaxed ${
+                  className={`p-3 rounded-2xl max-w-[94%] leading-relaxed ${
                     m.role === 'user'
-                      ? 'bg-indigo-600 text-white rounded-br-xs'
-                      : 'bg-slate-950 border border-slate-800 text-slate-200 rounded-bl-xs'
+                      ? 'bg-indigo-600 text-white rounded-br-xs shadow-sm font-sans'
+                      : 'bg-slate-950 border border-slate-800 text-slate-200 rounded-bl-xs shadow-xs'
                   }`}
                 >
-                  {m.content ? (
-                    <div className="whitespace-pre-wrap">{renderMessageContent(m.content)}</div>
+                  {m.role === 'user' ? (
+                    <div className="whitespace-pre-wrap">{m.content}</div>
+                  ) : m.content ? (
+                    <div className="chat-markdown prose-indigo">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          a({ href, children }) {
+                            if (href && href.startsWith('cite:')) {
+                              const rawRef = href.slice(5);
+                              const [filePath, hash] = rawRef.split('#');
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => handleCitationClick(filePath, hash || null)}
+                                  className="inline-flex items-center gap-1 mx-1 px-1.5 py-0.5 rounded-md bg-indigo-950/80 border border-indigo-700/80 text-indigo-300 font-mono text-[11px] hover:bg-indigo-900 transition-colors align-baseline"
+                                  title={`Open ${filePath}${hash ? ` at ${hash}` : ''}`}
+                                >
+                                  <FileText size={10} className="shrink-0 text-indigo-400" />
+                                  <span className="truncate max-w-[180px]">{rawRef}</span>
+                                </button>
+                              );
+                            }
+                            return (
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-indigo-400 underline hover:text-indigo-300"
+                              >
+                                {children}
+                              </a>
+                            );
+                          },
+                          code({ className, children, ...props }: any) {
+                            const match = /language-(\w+)/.exec(className || '');
+                            const language = match ? match[1] : '';
+                            const codeString = String(children).replace(/\n$/, '');
+
+                            const isInline = !match && !codeString.includes('\n');
+                            if (isInline) {
+                              return (
+                                <code
+                                  dir="ltr"
+                                  className="px-1.5 py-0.5 rounded bg-slate-800/80 text-indigo-300 font-mono text-[11px] border border-slate-700/50"
+                                  {...props}
+                                >
+                                  {children}
+                                </code>
+                              );
+                            }
+
+                            return <ChatCodeBlock language={language} code={codeString} />;
+                          },
+                          table({ children }) {
+                            return (
+                              <div className="my-2.5 overflow-x-auto rounded-lg border border-slate-800">
+                                <table className="w-full text-left border-collapse text-xs">
+                                  {children}
+                                </table>
+                              </div>
+                            );
+                          },
+                          th({ children }) {
+                            return (
+                              <th className="bg-slate-900 px-3 py-1.5 border-b border-slate-800 font-semibold text-slate-200">
+                                {children}
+                              </th>
+                            );
+                          },
+                          td({ children }) {
+                            return (
+                              <td className="px-3 py-1.5 border-b border-slate-800/60 text-slate-300">
+                                {children}
+                              </td>
+                            );
+                          },
+                          blockquote({ children }) {
+                            return (
+                              <blockquote className="border-s-3 border-indigo-500 bg-indigo-950/20 px-3 py-1.5 rounded-e-lg my-2 text-slate-300 italic">
+                                {children}
+                              </blockquote>
+                            );
+                          },
+                        }}
+                      >
+                        {formatMarkdownCitations(m.content)}
+                      </ReactMarkdown>
+                    </div>
                   ) : (
-                    <div className="flex items-center gap-2 text-slate-500 py-1">
+                    <div className="flex items-center gap-2 text-slate-400 py-1 font-sans">
                       <Loader2 size={13} className="animate-spin text-indigo-400" />
-                      <span>Thinking...</span>
+                      <span>Searching permitted documents & formulating response...</span>
                     </div>
                   )}
                 </div>
 
-                {/* Citations Footer */}
+                {/* Grounded Sources Footer */}
                 {m.citations && m.citations.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1 max-w-[92%]">
+                  <div className="mt-2 flex flex-wrap gap-1 max-w-[94%]">
                     <span className="text-[10px] text-slate-500 font-medium uppercase tracking-wider w-full mb-0.5">
                       Grounded Sources:
                     </span>
                     {m.citations.map((c, cIdx) => (
                       <button
                         key={cIdx}
+                        type="button"
                         onClick={() =>
                           handleCitationClick(
                             c.filePath,
                             c.startLine ? `L${c.startLine}-L${c.endLine}` : null
                           )
                         }
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 font-mono text-[10px] hover:border-indigo-500 transition-colors"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 font-mono text-[10px] hover:border-indigo-500 transition-colors shadow-xs"
                       >
                         <FileText size={10} className="text-indigo-400" />
                         <span>
@@ -452,9 +575,10 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
                 className="w-full bg-transparent border-0 resize-none px-2 py-1 text-xs text-slate-200 placeholder-slate-500 focus:outline-none"
               />
               <button
+                type="button"
                 onClick={handleSend}
                 disabled={!inputQuestion.trim() || isStreaming}
-                className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white transition-colors shrink-0 ms-1"
+                className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white transition-colors shrink-0 ms-1 shadow-sm"
               >
                 {isStreaming ? (
                   <Loader2 size={13} className="animate-spin" />

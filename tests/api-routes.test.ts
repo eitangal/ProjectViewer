@@ -224,5 +224,21 @@ describe('End-to-End Fastify API Route Lifecycle (api-routes.test.ts)', () => {
     const restrictedJson = JSON.parse(restrictedBlobRes.payload);
     expect(restrictedJson.restricted).toBe(true);
     expect(restrictedJson.error).toMatch(/Access restricted/i);
+
+    // 13. Publisher deletes project -> 200 OK
+    const deleteRes = await app.inject({
+      method: 'DELETE',
+      url: `/api/projects/${projectId}`,
+      headers: { Authorization: `Bearer ${pubToken}` },
+    });
+    expect(deleteRes.statusCode).toBe(200);
+
+    // 14. Project is no longer found
+    const getDeletedRes = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${projectId}`,
+      headers: { Authorization: `Bearer ${pubToken}` },
+    });
+    expect(getDeletedRes.statusCode).toBe(404);
   });
 });

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
+  Menu,
+  ChevronRight,
   ShieldAlert,
   Server,
   HardDrive,
@@ -22,6 +24,8 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { ThemeAndUserControls } from '../common/ThemeAndUserControls.js';
+import { useViewerStore } from '../../store/useViewerStore.js';
+import { RagAssistantDrawer } from '../viewer/RagAssistantDrawer.js';
 
 export const SysAdminConsole: React.FC<{
   publishers: any[];
@@ -36,6 +40,12 @@ export const SysAdminConsole: React.FC<{
   onRefreshTelemetry: () => Promise<void>;
   onLogout: () => void;
   user?: { email: string; role?: string; globalRole?: string } | null;
+  onSwitchView?: (view: 'admin' | 'publisher' | 'viewer') => void;
+  activeProjectId?: string | null;
+  embedded?: boolean;
+  tab?: 'overview' | 'smtp';
+  showInviteModalControlled?: boolean;
+  onCloseInviteModal?: () => void;
 }> = ({
   publishers,
   telemetry,
@@ -44,9 +54,29 @@ export const SysAdminConsole: React.FC<{
   onRefreshTelemetry,
   onLogout,
   user,
+  onSwitchView,
+  activeProjectId,
+  embedded = false,
+  tab,
+  showInviteModalControlled,
+  onCloseInviteModal,
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'smtp'>('overview');
-  const [showInviteModal, setShowInviteModal] = useState(false);
+  const {
+    isSidebarOpen,
+    toggleSidebar,
+    isAiDrawerOpen,
+    toggleAiDrawer,
+  } = useViewerStore();
+  const [internalActiveTab, setInternalActiveTab] = useState<'overview' | 'smtp'>('overview');
+  const activeTab = tab || internalActiveTab;
+  const setActiveTab = setInternalActiveTab;
+
+  const [internalShowInviteModal, setInternalShowInviteModal] = useState(false);
+  const showInviteModal = showInviteModalControlled !== undefined ? showInviteModalControlled : internalShowInviteModal;
+  const setShowInviteModal = (val: boolean) => {
+    setInternalShowInviteModal(val);
+    if (!val && onCloseInviteModal) onCloseInviteModal();
+  };
   const [email, setEmail] = useState('');
   const [maxRepos, setMaxRepos] = useState(5);
   const [maxDiskMb, setMaxDiskMb] = useState(500);
@@ -195,72 +225,160 @@ export const SysAdminConsole: React.FC<{
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 text-slate-100">
-      {/* Top Header */}
-      <header className="h-16 border-b border-slate-800 bg-slate-900/90 backdrop-blur-md flex items-center justify-between px-6 shrink-0 z-30">
-        <div className="flex items-center gap-3">
-          <ShieldAlert size={20} className="text-rose-400" />
-          <h1 className="text-sm font-semibold text-slate-100 tracking-wide">
-            Platform Operator & Governance Console (SysAdmin)
-          </h1>
+    <div
+      dir="ltr"
+      className={
+        embedded
+          ? 'flex flex-1 overflow-hidden relative'
+          : 'flex flex-col h-screen w-screen overflow-hidden bg-slate-950 text-slate-100'
+      }
+    >
+      {/* Unified Top Header (h-14) */}
+      {!embedded && (
+        <header className="h-14 border-b border-slate-800 bg-slate-900/90 backdrop-blur-md flex items-center justify-between px-4 shrink-0 z-30">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              aria-label="Toggle Governance Navigation"
+              title="Toggle Navigation Menu"
+              className={`p-2 rounded-xl transition-colors ${
+                isSidebarOpen ? 'bg-slate-800 text-slate-100 font-medium' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <Menu size={18} />
+            </button>
 
-          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 ms-4 text-xs">
-            <button
-              onClick={() => setActiveTab('overview')}
-              className={`px-3 py-1 rounded-lg transition-colors ${
-                activeTab === 'overview'
-                  ? 'bg-indigo-600 text-white font-medium'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Overview & Quotas
-            </button>
-            <button
-              onClick={() => setActiveTab('smtp')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg transition-colors ${
-                activeTab === 'smtp'
-                  ? 'bg-indigo-600 text-white font-medium'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Mail size={13} />
-              <span>Brevo API Email Setup</span>
-              {!isBrevoConfigured && (
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="Brevo API not configured" />
-              )}
-            </button>
+            <div className="flex items-center gap-2 text-rose-400 font-semibold text-sm tracking-wide shrink-0">
+              <ShieldAlert size={18} />
+              <span className="hidden sm:inline">Platform Governance</span>
+              <span className="sm:hidden">SysAdmin</span>
+            </div>
+
+            <div className="h-4 w-px bg-slate-800 hidden sm:block" />
+
+            <span className="hidden md:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-mono bg-rose-950/80 text-rose-300 border border-rose-800/60">
+              Operator
+            </span>
           </div>
-        </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowInviteModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-medium transition-colors shadow-lg shadow-indigo-600/20"
-          >
-            <Plus size={14} />
-            <span>Onboard Publisher</span>
-          </button>
+          <div className="flex items-center gap-2 md:gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowInviteModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-medium transition-colors shadow-lg shadow-indigo-600/20"
+            >
+              <Plus size={14} />
+              <span className="hidden sm:inline">Onboard Publisher</span>
+              <span className="sm:hidden">Onboard</span>
+            </button>
 
-          <button
-            onClick={onRefreshTelemetry}
-            title="Refresh Telemetry"
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
-          >
-            <RefreshCw size={15} />
-          </button>
+            <button
+              type="button"
+              onClick={onRefreshTelemetry}
+              title="Refresh Telemetry"
+              className="p-2 rounded-xl text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+            >
+              <RefreshCw size={15} />
+            </button>
 
-          <ThemeAndUserControls
-            user={user}
-            onLogout={onLogout}
-            showUser={true}
-            showTheme={true}
-            showLogout={true}
-          />
-        </div>
-      </header>
+            {/* AI Chat Drawer Toggle */}
+            <button
+              type="button"
+              onClick={toggleAiDrawer}
+              title={isAiDrawerOpen ? 'Close AI Assistant' : 'Open AI Assistant'}
+              aria-label="Toggle AI Assistant"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+                isAiDrawerOpen
+                  ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30'
+                  : 'bg-slate-900 hover:bg-slate-800 text-indigo-400 border-slate-800'
+              }`}
+            >
+              <Sparkles size={14} />
+              <span className="hidden md:inline">AI Chat</span>
+            </button>
 
-      {/* Main Dashboard Canvas */}
-      <main className="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-950 flex flex-col gap-8 max-w-6xl mx-auto w-full">
+            <div className="h-4 w-px bg-slate-800 mx-0.5 hidden sm:block" />
+
+            <ThemeAndUserControls
+              user={user}
+              onLogout={onLogout}
+              showUser={true}
+              showTheme={true}
+              showLogout={true}
+            />
+          </div>
+        </header>
+      )}
+
+      {/* Main Workspace Pane */}
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Left Collapsible Navigation Sidebar (w-72) */}
+        {!embedded && isSidebarOpen && (
+          <aside className="w-72 border-e border-slate-800 bg-slate-950 flex flex-col shrink-0 overflow-hidden h-full z-20">
+            <div className="p-3 border-b border-slate-800/80 bg-slate-900/40">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  Governance
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-rose-950 text-rose-300 border border-rose-800/80">
+                  Root
+                </span>
+              </div>
+              <p className="font-semibold text-xs text-slate-100 truncate mt-1">
+                SysAdmin Governance
+              </p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab('overview')}
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-colors w-full text-start ${
+                  activeTab === 'overview'
+                    ? 'bg-indigo-600/20 text-indigo-300 border-s-2 border-indigo-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <Server size={15} className="shrink-0" />
+                <span className="flex-1">Overview & Quotas</span>
+                <ChevronRight size={13} className="text-slate-600" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('smtp')}
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-colors w-full text-start ${
+                  activeTab === 'smtp'
+                    ? 'bg-indigo-600/20 text-indigo-300 border-s-2 border-indigo-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <Mail size={15} className="shrink-0" />
+                <span className="flex-1">Brevo API Setup</span>
+                {!isBrevoConfigured && (
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="Brevo API not configured" />
+                )}
+                <ChevronRight size={13} className="text-slate-600" />
+              </button>
+            </div>
+
+            {/* Telemetry Summary Footer */}
+            <div className="p-3 border-t border-slate-800 bg-slate-900/50 flex flex-col gap-1 text-[11px] text-slate-400">
+              <div className="flex items-center justify-between">
+                <span>Total Repos:</span>
+                <span className="font-mono text-slate-200">{stats.totalRepos}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Total Users:</span>
+                <span className="font-mono text-slate-200">{stats.totalUsers}</span>
+              </div>
+            </div>
+          </aside>
+        )}
+
+        {/* Main Dashboard Canvas */}
+        <main className="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-950 flex flex-col gap-8 max-w-6xl mx-auto w-full min-w-0">
         {activeTab === 'smtp' ? (
           /* Brevo API Configuration Tab */
           <div className="flex flex-col gap-6">
@@ -607,6 +725,10 @@ export const SysAdminConsole: React.FC<{
           </>
         )}
       </main>
+
+      {/* Right Collapsible AI Chat Assistant Drawer */}
+      {!embedded && activeProjectId && <RagAssistantDrawer projectId={activeProjectId} />}
+    </div>
 
       {/* Onboard Publisher Form Modal */}
       {showInviteModal && (

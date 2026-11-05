@@ -9,7 +9,9 @@ const execFileAsync = promisify(execFile);
 export class BareGitManager {
   private fileCache: Map<string, RepoFileEntry[]> = new Map();
 
-  constructor(private readonly baseReposDir: string) {}
+  constructor(private readonly baseReposDir: string) {
+    execFile('git', ['config', '--global', '--add', 'safe.directory', '*'], () => {});
+  }
 
   public getRepoDir(projectId: string): string {
     return path.join(this.baseReposDir, `${projectId}.git`);
@@ -19,9 +21,10 @@ export class BareGitManager {
    * Builds an authenticated HTTPS URL in-memory without persisting tokens in .git/config
    */
   private buildAuthHeader(githubPat?: string): string[] {
-    if (!githubPat) return [];
+    const args = ['-c', 'safe.directory=*'];
+    if (!githubPat) return args;
     const basicAuth = Buffer.from(`x-access-token:${githubPat}`).toString('base64');
-    return ['-c', `http.extraHeader=Authorization: Basic ${basicAuth}`];
+    return [...args, '-c', `http.extraHeader=Authorization: Basic ${basicAuth}`];
   }
 
   /**
@@ -45,6 +48,8 @@ export class BareGitManager {
     if (!exists) {
       await fs.mkdir(path.dirname(repoDir), { recursive: true });
       await execFileAsync('git', [
+        '-c',
+        'safe.directory=*',
         ...authArgs,
         'clone',
         '--bare',
@@ -60,6 +65,8 @@ export class BareGitManager {
       await execFileAsync(
         'git',
         [
+          '-c',
+          'safe.directory=*',
           ...authArgs,
           'fetch',
           'origin',
@@ -72,7 +79,7 @@ export class BareGitManager {
       );
     }
 
-    const { stdout } = await execFileAsync('git', ['rev-parse', branch], { cwd: repoDir });
+    const { stdout } = await execFileAsync('git', ['-c', 'safe.directory=*', 'rev-parse', branch], { cwd: repoDir });
     return stdout.trim();
   }
 
@@ -104,7 +111,7 @@ export class BareGitManager {
     const repoDir = this.getRepoDir(projectId);
     const { stdout } = await execFileAsync(
       'git',
-      ['-c', 'core.quotePath=false', 'ls-tree', '-r', '-l', '--full-tree', commitSha],
+      ['-c', 'safe.directory=*', '-c', 'core.quotePath=false', 'ls-tree', '-r', '-l', '--full-tree', commitSha],
       { cwd: repoDir, maxBuffer: 25 * 1024 * 1024 }
     );
 
@@ -152,7 +159,7 @@ export class BareGitManager {
     try {
       const { stdout } = await execFileAsync(
         'git',
-        ['-c', 'core.quotePath=false', 'diff', '--name-status', '--no-renames', oldSha, newSha],
+        ['-c', 'safe.directory=*', '-c', 'core.quotePath=false', 'diff', '--name-status', '--no-renames', oldSha, newSha],
         { cwd: repoDir, maxBuffer: 25 * 1024 * 1024 }
       );
 
@@ -191,7 +198,7 @@ export class BareGitManager {
     const repoDir = this.getRepoDir(projectId);
     const { stdout } = await execFileAsync(
       'git',
-      ['-c', 'core.quotePath=false', 'cat-file', 'blob', `${commitSha}:${filePath}`],
+      ['-c', 'safe.directory=*', '-c', 'core.quotePath=false', 'cat-file', 'blob', `${commitSha}:${filePath}`],
       { cwd: repoDir, maxBuffer: 15 * 1024 * 1024 }
     );
     return stdout;

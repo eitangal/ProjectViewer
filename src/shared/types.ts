@@ -44,6 +44,7 @@ export interface ProjectSummary {
   id: string;
   name: string;
   ownerId: string;
+  userRole?: 'PUBLISHER' | 'VIEWER';
   repoUrl: string;
   branch: string;
   hasGithubPat: boolean;

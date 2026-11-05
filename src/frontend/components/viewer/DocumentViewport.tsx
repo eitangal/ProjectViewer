@@ -22,6 +22,7 @@ export const DocumentViewport: React.FC<{
     projectId: storeProjectId,
     isAiDrawerOpen,
     isAiDrawerMaximized,
+    direction,
   } = useViewerStore();
   const viewportRef = useRef<HTMLDivElement>(null);
   const effectiveProjectId = projectId || storeProjectId;
@@ -124,9 +125,12 @@ export const DocumentViewport: React.FC<{
   return (
     <main
       ref={viewportRef}
-      className={`flex-1 min-w-0 overflow-y-auto px-6 py-6 md:px-10 bg-slate-950 relative ${hiddenClass}`}
+      dir={direction}
+      className={`flex-1 min-w-0 overflow-y-auto px-6 py-6 md:px-10 bg-slate-950 relative ${hiddenClass} ${
+        direction === 'rtl' ? 'text-right' : 'text-left'
+      }`}
     >
-      <div className="w-full min-h-full">
+      <div className="w-full min-h-full" dir={direction}>
         {viewMode === 'raw' ? (
           <RawCodeRenderer code={content} filePath={activeFilePath} />
         ) : (

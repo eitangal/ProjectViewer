@@ -15,7 +15,13 @@ services:
       - BREVO_SENDER_EMAIL=${BREVO_SENDER_EMAIL}
       - BREVO_SENDER_NAME=${BREVO_SENDER_NAME:-GitLens Portal}
     volumes:
-      - portal_data:/var/lib/gitportal/data
+      - ./data:/var/lib/gitportal/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - portal_net
 
@@ -24,7 +30,7 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
+      - "127.0.0.1:3000:80"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -32,10 +38,10 @@ services:
     networks:
       - portal_net
     depends_on:
-      - app
+      app:
+        condition: service_healthy
 
 volumes:
-  portal_data:
   caddy_data:
   caddy_config:
 
