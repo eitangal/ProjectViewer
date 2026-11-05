@@ -353,12 +353,21 @@ export class AuthService {
           throw new Error('Incorrect verification code.');
         }
 
-        // Check if any challenge exists for this email (to distinguish expired from non-existent)
+        // Check if any challenge exists for this email (to distinguish expired, consumed, or locked out)
         const anyChallenge = this.db
           .prepare(`SELECT * FROM auth_challenges WHERE email = ? ORDER BY expires_at DESC LIMIT 1`)
           .get(email) as any;
 
         if (anyChallenge) {
+          if (anyChallenge.consumed_at) {
+            throw new Error('This verification code or login link has already been used. Please request a new code.');
+          }
+          if (anyChallenge.expires_at <= now) {
+            throw new Error('Verification code expired. Please request a new code.');
+          }
+          if (anyChallenge.attempts >= this.MAX_OTP_ATTEMPTS) {
+            throw new Error('Verification code expired or maximum attempts exceeded.');
+          }
           throw new Error('Verification code expired or maximum attempts exceeded.');
         }
 

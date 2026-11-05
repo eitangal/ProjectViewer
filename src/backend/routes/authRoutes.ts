@@ -52,30 +52,17 @@ export async function registerAuthRoutes(
   });
 
   // 3. GET /api/auth/verify & GET /auth/verify (browser link redirect handler)
+  // Safe & Idempotent GET handler: Never consume one-time auth tokens on HTTP GET!
+  // Enterprise email security scanners (e.g. Microsoft Defender SafeLinks for Office 365,
+  // Proofpoint, Google Workspace) pre-fetch and inspect links in emails via HTTP GET.
+  // Consuming on GET allows automated scanners to burn tokens before the user can open them.
+  // Instead, redirect to the web app which will authenticate via POST /api/auth/verify.
   const verifyGetHandler = async (req: any, reply: any) => {
     const { token } = req.query as { token?: string };
     if (!token) {
       return reply.redirect('/?error=missing_token');
     }
-    try {
-      const result = await authService.verifyChallenge({ magicToken: token });
-      reply.setCookie('portal_session', result.jwt, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        path: '/',
-        maxAge: 12 * 60 * 60,
-      });
-      if (result.redirectProjectId) {
-        return reply.redirect(`/viewer/${result.redirectProjectId}`);
-      }
-      if (result.user.globalRole === 'SYSADMIN') {
-        return reply.redirect('/admin');
-      }
-      return reply.redirect('/publisher');
-    } catch {
-      return reply.redirect('/?error=invalid_or_expired_token');
-    }
+    return reply.redirect(`/?token=${encodeURIComponent(token)}`);
   };
 
   app.get('/api/auth/verify', verifyGetHandler);

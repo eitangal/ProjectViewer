@@ -1,15 +1,24 @@
 import { FastifyInstance } from 'fastify';
 import Database from 'better-sqlite3';
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { AuthService } from '../auth/authService.js';
 import { buildAuthMiddlewares } from '../auth/authMiddleware.js';
 import { PortalMailer, SmtpConfig, BrevoApiConfig, parseSender } from '../auth/mailer.js';
+import { LocalRepoService } from '../services/localRepoService.js';
+import { ProjectCopierService } from '../services/projectCopier.js';
+import { ProjectSyncAndRagOrchestrator } from '../workers/syncWorker.js';
+import { encryptSecret } from '../utils/crypto.js';
 
 export async function registerAdminRoutes(
   app: FastifyInstance,
   db: Database.Database,
   authService: AuthService,
   middlewares: ReturnType<typeof buildAuthMiddlewares>,
-  mailer?: PortalMailer
+  mailer?: PortalMailer,
+  localRepoService?: LocalRepoService,
+  projectCopier?: ProjectCopierService,
+  syncOrchestrator?: ProjectSyncAndRagOrchestrator
 ) {
   const adminGuard = { preHandler: [middlewares.requireRole(['SYSADMIN'])] };
 
@@ -244,4 +253,118 @@ export async function registerAdminRoutes(
   app.get('/api/admin/smtp', adminGuard, handleGetEmailConfig);
   app.put('/api/admin/smtp', adminGuard, handleSaveEmailConfig);
   app.post('/api/admin/smtp/test', adminGuard, handleTestEmailConfig);
+
+  // 7. SysAdmin: Inspect Local VPS Cloned Repository (SYS-LOCAL-01)
+  app.post('/api/admin/local-repos/inspect', adminGuard, async (req, reply) => {
+    if (!localRepoService) {
+      return reply.code(500).send({ error: 'Local repository service is not initialized' });
+    }
+    const { path: rawPath } = (req.body as { path: string }) || {};
+    if (!rawPath) {
+      return reply.code(400).send({ error: 'Filesystem directory path is required' });
+    }
+
+    const result = await localRepoService.inspectLocalRepo(rawPath);
+    return reply.send(result);
+  });
+
+  // 8. SysAdmin: Publish Local VPS Cloned Repository without Git Connection & Copy to Additional Location (SYS-LOCAL-02)
+  app.post('/api/admin/local-repos/publish', adminGuard, async (req, reply) => {
+    if (!localRepoService) {
+      return reply.code(500).send({ error: 'Local repository service is not initialized' });
+    }
+
+    const {
+      name,
+      localPath,
+      branch,
+      additionalCopyPath,
+      copyMode,
+      autoCopyOnSync,
+      geminiApiKey,
+    } = (req.body as {
+      name: string;
+      localPath: string;
+      branch?: string;
+      additionalCopyPath?: string;
+      copyMode?: 'WORKING_TREE' | 'FULL_REPO';
+      autoCopyOnSync?: boolean;
+      geminiApiKey?: string;
+    }) || {};
+
+    if (!name || !localPath) {
+      return reply.code(400).send({ error: 'Project name and local directory path are required' });
+    }
+
+    // Inspect and validate local repository
+    const inspection = await localRepoService.inspectLocalRepo(localPath);
+    if (!inspection.isValid) {
+      return reply.code(400).send({ error: inspection.error || 'Invalid local Git repository' });
+    }
+
+    const projectId = randomUUID();
+    const resolvedSource = path.resolve(localPath.trim());
+    const trackingBranch = branch?.trim() || inspection.currentBranch || 'main';
+    const resolvedAdditional = additionalCopyPath?.trim() ? path.resolve(additionalCopyPath.trim()) : null;
+    const encGemini = geminiApiKey?.trim() ? encryptSecret(geminiApiKey.trim()) : null;
+
+    db.prepare(`
+      INSERT INTO projects (
+        id, owner_id, name, repo_url, branch,
+        encrypted_gemini_key, is_local_repo, local_source_path,
+        additional_copy_path, copy_mode, auto_copy_on_sync,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+    `).run(
+      projectId,
+      req.user!.sub,
+      name.trim(),
+      resolvedSource,
+      trackingBranch,
+      encGemini,
+      resolvedSource,
+      resolvedAdditional,
+      copyMode || 'WORKING_TREE',
+      autoCopyOnSync !== false ? 1 : 0,
+      Date.now()
+    );
+
+    // Create default "All Docs" Viewer Group
+    const defaultGroupId = randomUUID();
+    db.prepare(`
+      INSERT INTO viewer_groups (id, project_id, name, allowed_folders_json, allowed_extensions_json, exclude_globs_json, max_file_size_bytes)
+      VALUES (?, ?, 'Default Viewers', '["*"]', '[]', '["**/*.secret.*", "**/internal/**", "**/.env*"]', 2097152)
+    `).run(defaultGroupId, projectId);
+
+    // Synchronize local bare repository and initial file list
+    let syncResult: any = null;
+    if (syncOrchestrator) {
+      try {
+        syncResult = await syncOrchestrator.syncProject(projectId, 'MANUAL');
+      } catch (err: any) {
+        console.error('Initial sync of local project failed:', err);
+      }
+    }
+
+    // If additional copy location was provided, copy immediately
+    let copyResult: any = null;
+    if (resolvedAdditional && projectCopier) {
+      try {
+        copyResult = await projectCopier.copyProjectToLocation(projectId, resolvedAdditional, {
+          commitSha: syncResult?.newSha || inspection.headCommitSha,
+          copyMode: copyMode || 'WORKING_TREE',
+          localSourcePath: resolvedSource,
+        });
+      } catch (copyErr: any) {
+        console.error('Initial copy to additional location failed:', copyErr);
+      }
+    }
+
+    return reply.send({
+      ok: true,
+      projectId,
+      syncResult,
+      copyResult,
+    });
+  });
 }

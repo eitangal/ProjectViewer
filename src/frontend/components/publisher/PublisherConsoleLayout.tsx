@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Menu,
   GitPullRequest,
@@ -13,6 +13,12 @@ import {
   Layers,
   ChevronRight,
   ExternalLink,
+  HardDrive,
+  CheckCircle2,
+  FolderSync,
+  Globe,
+  FolderCheck,
+  Search,
 } from 'lucide-react';
 import { ProjectSummary, ViewerGroupSummary, ViewerMembershipSummary } from '@/shared/types.js';
 import { SyncAndRepoTab } from './SyncAndRepoTab.js';
@@ -47,8 +53,10 @@ export const PublisherConsoleLayout: React.FC<{
   embedded?: boolean;
   tab?: 'sync' | 'acl' | 'viewers' | 'ai';
   showCreateModalControlled?: boolean;
+  onOpenCreateModal?: () => void;
   onCloseCreateModal?: () => void;
   showDeleteModalControlled?: boolean;
+  onOpenDeleteModal?: () => void;
   onCloseDeleteModal?: () => void;
 }> = ({
   projects,
@@ -74,8 +82,10 @@ export const PublisherConsoleLayout: React.FC<{
   embedded = false,
   tab,
   showCreateModalControlled,
+  onOpenCreateModal,
   onCloseCreateModal,
   showDeleteModalControlled,
+  onOpenDeleteModal,
   onCloseDeleteModal,
 }) => {
   const {
@@ -93,36 +103,122 @@ export const PublisherConsoleLayout: React.FC<{
   const [internalShowCreateModal, setInternalShowCreateModal] = useState(false);
   const [internalShowDeleteModal, setInternalShowDeleteModal] = useState(false);
 
-  const showCreateModal = showCreateModalControlled !== undefined ? showCreateModalControlled : internalShowCreateModal;
+  useEffect(() => {
+    if (showCreateModalControlled !== undefined) {
+      setInternalShowCreateModal(showCreateModalControlled);
+    }
+  }, [showCreateModalControlled]);
+
+  useEffect(() => {
+    if (showDeleteModalControlled !== undefined) {
+      setInternalShowDeleteModal(showDeleteModalControlled);
+    }
+  }, [showDeleteModalControlled]);
+
+  const showCreateModal = Boolean(showCreateModalControlled || internalShowCreateModal);
   const setShowCreateModal = (val: boolean) => {
     setInternalShowCreateModal(val);
+    if (val && onOpenCreateModal) onOpenCreateModal();
     if (!val && onCloseCreateModal) onCloseCreateModal();
   };
 
-  const showDeleteModal = showDeleteModalControlled !== undefined ? showDeleteModalControlled : internalShowDeleteModal;
+  const showDeleteModal = Boolean(showDeleteModalControlled || internalShowDeleteModal);
   const setShowDeleteModal = (val: boolean) => {
     setInternalShowDeleteModal(val);
+    if (val && onOpenDeleteModal) onOpenDeleteModal();
     if (!val && onCloseDeleteModal) onCloseDeleteModal();
   };
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const isSysAdmin = user?.role === 'SYSADMIN' || user?.globalRole === 'SYSADMIN';
+
+  // Project Creation State
+  const [createMode, setCreateMode] = useState<'remote' | 'local'>('remote');
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectRepoUrl, setNewProjectRepoUrl] = useState('');
   const [newProjectBranch, setNewProjectBranch] = useState('main');
+  const [localSourcePath, setLocalSourcePath] = useState('');
+  const [additionalCopyPath, setAdditionalCopyPath] = useState('');
+  const [copyMode, setCopyMode] = useState<'WORKING_TREE' | 'FULL_REPO'>('WORKING_TREE');
+  const [autoCopyOnSync, setAutoCopyOnSync] = useState(true);
+  const [isInspecting, setIsInspecting] = useState(false);
+  const [inspectionResult, setInspectionResult] = useState<any>(null);
+  const [inspectionError, setInspectionError] = useState<string | null>(null);
+  const [isSubmittingCreate, setIsSubmittingCreate] = useState(false);
+
+  const handleInspectLocal = async () => {
+    if (!localSourcePath.trim()) return;
+    setIsInspecting(true);
+    setInspectionError(null);
+    setInspectionResult(null);
+    try {
+      const res = await fetch('/api/admin/local-repos/inspect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: localSourcePath.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.isValid) {
+        setInspectionError(data.error || 'Invalid local Git repository');
+      } else {
+        setInspectionResult(data);
+        if (!newProjectName) setNewProjectName(data.suggestedName);
+        if (data.currentBranch) setNewProjectBranch(data.currentBranch);
+      }
+    } catch (err: any) {
+      setInspectionError(err.message || 'Inspection failed');
+    } finally {
+      setIsInspecting(false);
+    }
+  };
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProjectName.trim() || !newProjectRepoUrl.trim()) return;
-    await onCreateProject({
-      name: newProjectName.trim(),
-      repoUrl: newProjectRepoUrl.trim(),
-      branch: newProjectBranch.trim() || 'main',
-    });
-    setShowCreateModal(false);
-    setNewProjectName('');
-    setNewProjectRepoUrl('');
-    setNewProjectBranch('main');
+    setIsSubmittingCreate(true);
+    try {
+      if (createMode === 'local' && isSysAdmin) {
+        if (!newProjectName.trim() || !localSourcePath.trim()) return;
+        const res = await fetch('/api/admin/local-repos/publish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: newProjectName.trim(),
+            localPath: localSourcePath.trim(),
+            branch: newProjectBranch.trim() || 'main',
+            additionalCopyPath: additionalCopyPath.trim() || undefined,
+            copyMode,
+            autoCopyOnSync,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to publish local project');
+        setShowCreateModal(false);
+        setNewProjectName('');
+        setLocalSourcePath('');
+        setAdditionalCopyPath('');
+        setInspectionResult(null);
+        if (onSelectProject && data.projectId) {
+          onSelectProject(data.projectId);
+        }
+        window.location.reload();
+      } else {
+        if (!newProjectName.trim() || !newProjectRepoUrl.trim()) return;
+        await onCreateProject({
+          name: newProjectName.trim(),
+          repoUrl: newProjectRepoUrl.trim(),
+          branch: newProjectBranch.trim() || 'main',
+        });
+        setShowCreateModal(false);
+        setNewProjectName('');
+        setNewProjectRepoUrl('');
+        setNewProjectBranch('main');
+      }
+    } catch (err: any) {
+      alert(`Error creating project: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsSubmittingCreate(false);
+    }
   };
 
   const handleDeleteSubmit = async () => {
@@ -138,8 +234,6 @@ export const PublisherConsoleLayout: React.FC<{
       setIsDeleting(false);
     }
   };
-
-  const isSysAdmin = user?.role === 'SYSADMIN' || user?.globalRole === 'SYSADMIN';
 
   return (
     <div
@@ -453,12 +547,166 @@ export const PublisherConsoleLayout: React.FC<{
         <div className="fixed inset-0 modal-overlay z-50 flex items-center justify-center p-4">
           <form
             onSubmit={handleCreateSubmit}
-            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full flex flex-col gap-4 shadow-2xl"
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full flex flex-col gap-4 shadow-2xl max-h-[90vh] overflow-y-auto"
           >
-            <h3 className="text-base font-semibold text-slate-100">Create New Project</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold text-slate-100">Create New Project</h3>
+              {isSysAdmin && (
+                <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setCreateMode('remote')}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-colors font-medium ${
+                      createMode === 'remote'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Globe size={12} />
+                    <span>Remote Git</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCreateMode('local')}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-colors font-medium ${
+                      createMode === 'local'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <HardDrive size={12} />
+                    <span>Local VPS Clone</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
             <p className="text-xs text-slate-400">
-              Connect a GitHub repository to begin curating fine-grained views.
+              {createMode === 'local'
+                ? 'Publish a repository already cloned locally on the VPS disk without requiring any Git network connection.'
+                : 'Connect a remote GitHub repository to begin curating fine-grained views.'}
             </p>
+
+            {/* Local VPS Path Input & Inspector */}
+            {createMode === 'local' && isSysAdmin ? (
+              <div className="flex flex-col gap-3 p-3.5 bg-slate-950/70 border border-slate-800 rounded-xl">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-slate-300 flex items-center justify-between">
+                    <span>Local Repository Path on VPS</span>
+                    <span className="text-[10px] text-slate-500 font-normal">Absolute path on host</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={localSourcePath}
+                      onChange={(e) => {
+                        setLocalSourcePath(e.target.value);
+                        setInspectionResult(null);
+                        setInspectionError(null);
+                      }}
+                      placeholder="/home/agydev/workspace/govlabs11-pmo"
+                      className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                    <button
+                      type="button"
+                      disabled={isInspecting || !localSourcePath.trim()}
+                      onClick={handleInspectLocal}
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 rounded-xl text-xs font-medium transition-colors flex items-center gap-1.5 shrink-0 border border-slate-700"
+                    >
+                      <Search size={13} className={isInspecting ? 'animate-spin' : ''} />
+                      <span>{isInspecting ? 'Inspecting...' : 'Inspect'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {inspectionResult && (
+                  <div className="bg-emerald-950/40 border border-emerald-900/60 rounded-xl p-3 flex flex-col gap-1.5 text-xs text-emerald-200">
+                    <div className="flex items-center gap-2 font-medium text-emerald-400">
+                      <CheckCircle2 size={14} />
+                      <span>Valid Git Repository Detected</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-emerald-300/80 pt-1 border-t border-emerald-900/40">
+                      <div>Branch: <strong className="text-emerald-200">{inspectionResult.currentBranch}</strong></div>
+                      <div>HEAD: <strong className="text-emerald-200">{inspectionResult.headCommitSha.slice(0, 7)}</strong></div>
+                      <div>Files: <strong className="text-emerald-200">{inspectionResult.totalFiles} files</strong></div>
+                      <div className="truncate">Msg: <span className="text-slate-300">{inspectionResult.commitMessage || 'No message'}</span></div>
+                    </div>
+                  </div>
+                )}
+
+                {inspectionError && (
+                  <div className="bg-rose-950/40 border border-rose-900/50 rounded-xl p-2.5 text-xs text-rose-300">
+                    {inspectionError}
+                  </div>
+                )}
+
+                {/* Additional Copy Location Option */}
+                <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-800/60">
+                  <label className="text-xs font-medium text-slate-300 flex items-center justify-between">
+                    <span>Copy to Additional Location (Optional)</span>
+                    <span className="text-[10px] text-slate-500 font-normal">Destination folder on VPS</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={additionalCopyPath}
+                    onChange={(e) => setAdditionalCopyPath(e.target.value)}
+                    placeholder="/home/agydev/backup/govlabs11-pmo"
+                    className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                {additionalCopyPath && (
+                  <div className="flex flex-col gap-2 pt-1 text-xs text-slate-300">
+                    <div className="flex items-center gap-3">
+                      <span className="text-[11px] text-slate-400">Copy Mode:</span>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="copyMode"
+                          checked={copyMode === 'WORKING_TREE'}
+                          onChange={() => setCopyMode('WORKING_TREE')}
+                          className="text-indigo-600 focus:ring-0"
+                        />
+                        <span className="text-[11px]">Clean Export</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="copyMode"
+                          checked={copyMode === 'FULL_REPO'}
+                          onChange={() => setCopyMode('FULL_REPO')}
+                          className="text-indigo-600 focus:ring-0"
+                        />
+                        <span className="text-[11px]">Full Repo (.git)</span>
+                      </label>
+                    </div>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-[11px] text-slate-400">
+                      <input
+                        type="checkbox"
+                        checked={autoCopyOnSync}
+                        onChange={(e) => setAutoCopyOnSync(e.target.checked)}
+                        className="rounded border-slate-700 text-indigo-600 focus:ring-0"
+                      />
+                      <span>Keep additional location in sync during future Git syncs</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-slate-300">GitHub Repository URL (HTTPS)</label>
+                <input
+                  type="url"
+                  required
+                  value={newProjectRepoUrl}
+                  onChange={(e) => setNewProjectRepoUrl(e.target.value)}
+                  placeholder="https://github.com/org/repo.git"
+                  className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            )}
 
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-slate-300">Project Display Name</label>
@@ -469,18 +717,6 @@ export const PublisherConsoleLayout: React.FC<{
                 onChange={(e) => setNewProjectName(e.target.value)}
                 placeholder="Core Platform Specs"
                 className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-slate-300">GitHub Repository URL (HTTPS)</label>
-              <input
-                type="url"
-                required
-                value={newProjectRepoUrl}
-                onChange={(e) => setNewProjectRepoUrl(e.target.value)}
-                placeholder="https://github.com/org/repo.git"
-                className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
               />
             </div>
 
@@ -498,6 +734,7 @@ export const PublisherConsoleLayout: React.FC<{
             <div className="flex items-center justify-end gap-2 mt-2">
               <button
                 type="button"
+                disabled={isSubmittingCreate}
                 onClick={() => setShowCreateModal(false)}
                 className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:bg-slate-800 transition-colors"
               >
@@ -505,9 +742,14 @@ export const PublisherConsoleLayout: React.FC<{
               </button>
               <button
                 type="submit"
-                className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-4 py-2 rounded-xl text-xs transition-colors"
+                disabled={isSubmittingCreate}
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium px-4 py-2 rounded-xl text-xs transition-colors flex items-center gap-1.5"
               >
-                Create Project
+                {isSubmittingCreate ? (
+                  <span>Publishing...</span>
+                ) : (
+                  <span>{createMode === 'local' ? 'Publish Local Project' : 'Create Project'}</span>
+                )}
               </button>
             </div>
           </form>
@@ -523,25 +765,41 @@ export const PublisherConsoleLayout: React.FC<{
                 <Trash2 size={20} />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="text-base font-semibold text-slate-100">Delete Project</h3>
+                <h3 className="text-base font-semibold text-slate-100">
+                  {activeProject.isLocalRepo ? 'Unpublish Project' : 'Delete Project'}
+                </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Are you sure you want to permanently delete <strong className="text-slate-200">{activeProject.name}</strong>?
+                  Are you sure you want to {activeProject.isLocalRepo ? 'unpublish' : 'permanently delete'}{' '}
+                  <strong className="text-slate-200">{activeProject.name}</strong>?
                 </p>
               </div>
             </div>
 
-            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 text-xs text-slate-400 flex flex-col gap-1.5">
+            <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 text-xs text-slate-400 flex flex-col gap-2">
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Repository:</span>
-                <span className="font-mono text-slate-300 truncate max-w-[200px]">{activeProject.repoUrl}</span>
+                <span className="text-slate-500">{activeProject.isLocalRepo ? 'Local Path:' : 'Repository:'}</span>
+                <span className="font-mono text-slate-300 truncate max-w-[200px]">
+                  {activeProject.localSourcePath || activeProject.repoUrl}
+                </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500">Branch:</span>
                 <span className="font-mono text-slate-300">{activeProject.branch}</span>
               </div>
-              <p className="text-[11px] text-rose-400/90 pt-1 border-t border-slate-800/60">
-                This will delete the local bare repository clone, all sync logs, viewer groups, access rules, and invite memberships.
-              </p>
+
+              {activeProject.isLocalRepo ? (
+                <div className="bg-emerald-950/40 border border-emerald-900/60 rounded-lg p-2.5 text-[11px] text-emerald-200 leading-relaxed">
+                  <strong>Safety Guarantee:</strong> Your local files on disk at{' '}
+                  <code className="bg-emerald-900/60 px-1 py-0.5 rounded text-emerald-300 font-mono">
+                    {activeProject.localSourcePath || activeProject.repoUrl}
+                  </code>{' '}
+                  will remain <strong>completely untouched</strong>. This action only removes the publishing configuration and AI vector index from GitLens-Portal.
+                </div>
+              ) : (
+                <p className="text-[11px] text-rose-400/90 pt-1 border-t border-slate-800/60">
+                  This will delete the local bare repository clone, all sync logs, viewer groups, access rules, and invite memberships.
+                </p>
+              )}
             </div>
 
             {deleteError && (
@@ -569,11 +827,11 @@ export const PublisherConsoleLayout: React.FC<{
                 className="bg-rose-600 hover:bg-rose-500 text-white font-medium px-4 py-2 rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50"
               >
                 {isDeleting ? (
-                  <span>Deleting...</span>
+                  <span>Processing...</span>
                 ) : (
                   <>
                     <Trash2 size={13} />
-                    <span>Delete Project</span>
+                    <span>{activeProject.isLocalRepo ? 'Unpublish Project' : 'Delete Project'}</span>
                   </>
                 )}
               </button>

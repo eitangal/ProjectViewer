@@ -241,4 +241,43 @@ describe('End-to-End Fastify API Route Lifecycle (api-routes.test.ts)', () => {
     });
     expect(getDeletedRes.statusCode).toBe(404);
   });
+
+  it('protects magic links from automated email scanners (SafeLinks): GET /auth/verify redirects without consuming token or invalidating OTP', async () => {
+    // 1. Request login code for registered admin
+    const email = 'root@gitlens-portal.local';
+    const reqRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/request-code',
+      payload: { email },
+    });
+    expect(reqRes.statusCode).toBe(200);
+
+    const sentMail = mailer.getLastSentEmail(email);
+    expect(sentMail).toBeDefined();
+    const token = new URL(sentMail!.magicLinkUrl).searchParams.get('token')!;
+    expect(token).toBeDefined();
+
+    // 2. Automated scanner (e.g. Microsoft Defender SafeLinks) issues GET request to magic link URL
+    const scannerRes = await app.inject({
+      method: 'GET',
+      url: `/auth/verify?token=${encodeURIComponent(token)}`,
+    });
+
+    // Scanner receives 302 redirect to frontend without session cookie
+    expect(scannerRes.statusCode).toBe(302);
+    expect(scannerRes.headers.location).toBe(`/?token=${encodeURIComponent(token)}`);
+    expect(scannerRes.headers['set-cookie']).toBeUndefined();
+
+    // 3. The actual user enters the 6-digit OTP code in the web interface and successfully logs in
+    const userOtpRes = await app.inject({
+      method: 'POST',
+      url: '/api/auth/verify',
+      payload: { email, otpCode: sentMail!.otpCode },
+    });
+
+    expect(userOtpRes.statusCode).toBe(200);
+    const userAuth = JSON.parse(userOtpRes.payload);
+    expect(userAuth.authenticated).toBe(true);
+    expect(userAuth.user.email).toBe(email);
+  });
 });

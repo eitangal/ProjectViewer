@@ -7,6 +7,7 @@ import { buildAuthMiddlewares } from '../auth/authMiddleware.js';
 import { ProjectSyncAndRagOrchestrator } from '../workers/syncWorker.js';
 import { BareGitManager } from '../services/gitManager.js';
 import { GeminiRagService } from '../services/geminiRagService.js';
+import { ProjectCopierService } from '../services/projectCopier.js';
 import { encryptSecret, verifyGithubWebhookSignature } from '../utils/crypto.js';
 
 export async function registerPublisherRoutes(
@@ -16,7 +17,8 @@ export async function registerPublisherRoutes(
   middlewares: ReturnType<typeof buildAuthMiddlewares>,
   gitManager: BareGitManager,
   syncOrchestrator: ProjectSyncAndRagOrchestrator,
-  geminiService: GeminiRagService
+  geminiService: GeminiRagService,
+  projectCopier?: ProjectCopierService
 ) {
   const publisherGuard = { preHandler: [middlewares.requireRole(['PUBLISHER', 'SYSADMIN'])] };
 
@@ -78,6 +80,14 @@ export async function registerPublisherRoutes(
       lastSyncError: r.last_sync_error,
       diskUsageBytes: r.disk_usage_bytes,
       totalFiles: r.total_files ?? 0,
+      isLocalRepo: !!r.is_local_repo,
+      localSourcePath: r.local_source_path || null,
+      additionalCopyPath: r.additional_copy_path || null,
+      copyMode: r.copy_mode || 'WORKING_TREE',
+      autoCopyOnSync: r.auto_copy_on_sync !== 0,
+      lastCopiedAt: r.last_copied_at || null,
+      lastCopyStatus: r.last_copy_status || null,
+      lastCopyError: r.last_copy_error || null,
       createdAt: r.created_at,
     }));
 
@@ -167,6 +177,15 @@ export async function registerPublisherRoutes(
         syncStatus: p.sync_status,
         lastSyncError: p.last_sync_error,
         diskUsageBytes: p.disk_usage_bytes,
+        totalFiles: p.total_files ?? 0,
+        isLocalRepo: !!p.is_local_repo,
+        localSourcePath: p.local_source_path || null,
+        additionalCopyPath: p.additional_copy_path || null,
+        copyMode: p.copy_mode || 'WORKING_TREE',
+        autoCopyOnSync: p.auto_copy_on_sync !== 0,
+        lastCopiedAt: p.last_copied_at || null,
+        lastCopyStatus: p.last_copy_status || null,
+        lastCopyError: p.last_copy_error || null,
         createdAt: p.created_at,
       },
     });
@@ -196,7 +215,10 @@ export async function registerPublisherRoutes(
         encrypted_github_pat = ?,
         encrypted_webhook_secret = ?,
         sync_interval_minutes = COALESCE(?, sync_interval_minutes),
-        daily_viewer_query_limit = COALESCE(?, daily_viewer_query_limit)
+        daily_viewer_query_limit = COALESCE(?, daily_viewer_query_limit),
+        additional_copy_path = COALESCE(?, additional_copy_path),
+        copy_mode = COALESCE(?, copy_mode),
+        auto_copy_on_sync = COALESCE(?, auto_copy_on_sync)
       WHERE id = ?
     `).run(
       body.name ?? null,
@@ -206,27 +228,72 @@ export async function registerPublisherRoutes(
       encWebhook,
       body.syncIntervalMinutes ?? null,
       body.dailyViewerQueryLimit ?? null,
+      body.additionalCopyPath !== undefined ? body.additionalCopyPath : null,
+      body.copyMode ?? null,
+      body.autoCopyOnSync !== undefined ? (body.autoCopyOnSync ? 1 : 0) : null,
       projectId
     );
 
     return reply.send({ ok: true });
   });
 
-  // 5. Delete Project
+  // 5. Delete Project (Strict Safe Deletion Rules)
   app.delete('/api/projects/:projectId', publisherGuard, async (req, reply) => {
     const { projectId } = req.params as { projectId: string };
     const p = getOwnedProject(projectId, req.user!.sub, req.user!.role);
     if (!p) return reply.code(404).send({ error: 'Project not found' });
 
     gitManager.clearCache(projectId);
+
+    // If synced from remote git (is_local_repo == 0): delete the bare clone in data/repos/<id>.git
+    // If pointing to local VPS drive (is_local_repo == 1):
+    //   STRICT SAFETY GUARANTEE: NEVER touch or delete local_source_path or additional_copy_path!
+    //   Only clean internal projection bare repo in data/repos/<id>.git.
+    const internalBareDir = gitManager.getRepoDir(projectId);
     try {
-      await fs.rm(gitManager.getRepoDir(projectId), { recursive: true, force: true });
+      await fs.rm(internalBareDir, { recursive: true, force: true });
     } catch {
       // ignore if folder does not exist
     }
 
     db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId);
-    return reply.send({ ok: true });
+
+    return reply.send({
+      ok: true,
+      isLocalRepo: !!p.is_local_repo,
+      message: p.is_local_repo
+        ? 'Project unpublished and index removed. Local files on disk were preserved.'
+        : 'Project and internal repository clone deleted successfully.',
+    });
+  });
+
+  // 5b. On-demand Copy Project to Additional Location
+  app.post('/api/projects/:projectId/copy-to-location', publisherGuard, async (req, reply) => {
+    const { projectId } = req.params as { projectId: string };
+    const p = getOwnedProject(projectId, req.user!.sub, req.user!.role);
+    if (!p) return reply.code(404).send({ error: 'Project not found' });
+
+    if (!projectCopier) {
+      return reply.code(500).send({ error: 'Project copier service not available' });
+    }
+
+    const body = (req.body as any) || {};
+    const dest = body.targetPath || p.additional_copy_path;
+    if (!dest) {
+      return reply.code(400).send({ error: 'Target directory path is required' });
+    }
+
+    const result = await projectCopier.copyProjectToLocation(projectId, dest, {
+      commitSha: p.last_synced_sha || undefined,
+      copyMode: body.copyMode || p.copy_mode || 'WORKING_TREE',
+      localSourcePath: p.local_source_path || undefined,
+    });
+
+    if (!result.ok) {
+      return reply.code(500).send({ error: result.error || 'Failed to copy project' });
+    }
+
+    return reply.send(result);
   });
 
   // 6. Trigger Delta Git Sync (PUB-03)

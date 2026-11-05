@@ -49,6 +49,14 @@ export function initSchema(db: Database.Database): void {
       last_sync_error TEXT,
       disk_usage_bytes INTEGER NOT NULL DEFAULT 0,
       total_files INTEGER NOT NULL DEFAULT 0,
+      is_local_repo INTEGER NOT NULL DEFAULT 0,
+      local_source_path TEXT,
+      additional_copy_path TEXT,
+      copy_mode TEXT NOT NULL DEFAULT 'WORKING_TREE',
+      auto_copy_on_sync INTEGER NOT NULL DEFAULT 1,
+      last_copied_at INTEGER,
+      last_copy_status TEXT,
+      last_copy_error TEXT,
       created_at INTEGER NOT NULL
     );
 
@@ -140,6 +148,18 @@ export function initSchema(db: Database.Database): void {
       error_message TEXT,
       created_at INTEGER NOT NULL
     );
+
+    -- 8. Persistent RAG Directory Tree Snapshots (Incremental Diff Sync)
+    CREATE TABLE IF NOT EXISTS rag_file_snapshots (
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      file_path TEXT NOT NULL,
+      blob_sha TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      chunk_count INTEGER NOT NULL DEFAULT 0,
+      last_indexed_at INTEGER NOT NULL,
+      PRIMARY KEY (project_id, file_path)
+    );
+    CREATE INDEX IF NOT EXISTS idx_rag_snapshots_proj ON rag_file_snapshots(project_id);
   `);
 
   // Safe migrations for backwards-compatible schema evolutions
@@ -148,5 +168,29 @@ export function initSchema(db: Database.Database): void {
   } catch {}
   try {
     db.exec(`ALTER TABLE sync_logs ADD COLUMN total_files INTEGER NOT NULL DEFAULT 0;`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN is_local_repo INTEGER NOT NULL DEFAULT 0;`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN local_source_path TEXT;`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN additional_copy_path TEXT;`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN copy_mode TEXT NOT NULL DEFAULT 'WORKING_TREE';`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN auto_copy_on_sync INTEGER NOT NULL DEFAULT 1;`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN last_copied_at INTEGER;`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN last_copy_status TEXT;`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN last_copy_error TEXT;`);
   } catch {}
 }

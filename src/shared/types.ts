@@ -15,6 +15,12 @@ export interface RepoFileEntry {
   sizeBytes: number;
 }
 
+export interface RepoFileEntryWithSha {
+  filePath: string;
+  blobSha: string;
+  sizeBytes: number;
+}
+
 export interface FileDelta {
   status: 'A' | 'M' | 'D';
   filePath: string;
@@ -62,7 +68,63 @@ export interface ProjectSummary {
   diskUsageBytes: number;
   totalFiles: number;
   indexedFiles?: number;
+  isLocalRepo?: boolean;
+  localSourcePath?: string | null;
+  additionalCopyPath?: string | null;
+  copyMode?: 'WORKING_TREE' | 'FULL_REPO';
+  autoCopyOnSync?: boolean;
+  lastCopiedAt?: number | null;
+  lastCopyStatus?: 'IDLE' | 'COPYING' | 'SUCCESS' | 'ERROR' | null;
+  lastCopyError?: string | null;
   createdAt: number;
+}
+
+export interface RagFileSnapshot {
+  projectId: string;
+  filePath: string;
+  blobSha: string;
+  sizeBytes: number;
+  chunkCount: number;
+  lastIndexedAt: number;
+}
+
+export interface InspectLocalRepoRequest {
+  path: string;
+}
+
+export interface InspectLocalRepoResponse {
+  isValid: boolean;
+  suggestedName: string;
+  currentBranch: string;
+  branches: string[];
+  headCommitSha: string;
+  commitMessage: string;
+  totalFiles: number;
+  isBare: boolean;
+  error?: string;
+}
+
+export interface PublishLocalProjectRequest {
+  name: string;
+  localPath: string;
+  branch?: string;
+  additionalCopyPath?: string;
+  copyMode?: 'WORKING_TREE' | 'FULL_REPO';
+  autoCopyOnSync?: boolean;
+  geminiApiKey?: string;
+}
+
+export interface CopyToLocationRequest {
+  targetPath?: string;
+  copyMode?: 'WORKING_TREE' | 'FULL_REPO';
+}
+
+export interface CopyToLocationResponse {
+  ok: boolean;
+  targetPath: string;
+  filesCount: number;
+  durationMs: number;
+  error?: string;
 }
 
 export interface ViewerGroupSummary {

@@ -12,6 +12,8 @@ import { AuthService } from './auth/authService.js';
 import { buildAuthMiddlewares } from './auth/authMiddleware.js';
 import { BareGitManager } from './services/gitManager.js';
 import { GeminiRagService } from './services/geminiRagService.js';
+import { LocalRepoService } from './services/localRepoService.js';
+import { ProjectCopierService } from './services/projectCopier.js';
 import { ProjectSyncAndRagOrchestrator } from './workers/syncWorker.js';
 
 import { registerAuthRoutes } from './routes/authRoutes.js';
@@ -33,6 +35,8 @@ export function buildApp(config: AppConfig): {
   gitManager: BareGitManager;
   syncOrchestrator: ProjectSyncAndRagOrchestrator;
   geminiService: GeminiRagService;
+  projectCopier: ProjectCopierService;
+  localRepoService: LocalRepoService;
 } {
   fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
   fs.mkdirSync(config.reposDir, { recursive: true });
@@ -43,7 +47,9 @@ export function buildApp(config: AppConfig): {
   const middlewares = buildAuthMiddlewares(db);
   const gitManager = new BareGitManager(config.reposDir);
   const geminiService = new GeminiRagService();
-  const syncOrchestrator = new ProjectSyncAndRagOrchestrator(db, gitManager, geminiService);
+  const projectCopier = new ProjectCopierService(db, gitManager);
+  const localRepoService = new LocalRepoService();
+  const syncOrchestrator = new ProjectSyncAndRagOrchestrator(db, gitManager, geminiService, projectCopier);
 
   // Bootstrap initial SysAdmin
   const bootstrapEmail = config.bootstrapSysAdminEmail || process.env.SYSADMIN_BOOTSTRAP_EMAIL || 'admin@gitlens-portal.local';
@@ -70,8 +76,8 @@ export function buildApp(config: AppConfig): {
 
   // Register Routes
   registerAuthRoutes(app, authService, middlewares);
-  registerAdminRoutes(app, db, authService, middlewares, mailer);
-  registerPublisherRoutes(app, db, authService, middlewares, gitManager, syncOrchestrator, geminiService);
+  registerAdminRoutes(app, db, authService, middlewares, mailer, localRepoService, projectCopier, syncOrchestrator);
+  registerPublisherRoutes(app, db, authService, middlewares, gitManager, syncOrchestrator, geminiService, projectCopier);
   registerViewerRoutes(app, db, middlewares, gitManager, syncOrchestrator, geminiService);
 
   // Serve static SPA in production if dist/client exists
@@ -97,5 +103,7 @@ export function buildApp(config: AppConfig): {
     gitManager,
     syncOrchestrator,
     geminiService,
+    projectCopier,
+    localRepoService,
   };
 }

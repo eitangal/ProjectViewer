@@ -45,6 +45,7 @@ export const SysAdminConsole: React.FC<{
   embedded?: boolean;
   tab?: 'overview' | 'smtp';
   showInviteModalControlled?: boolean;
+  onOpenInviteModal?: () => void;
   onCloseInviteModal?: () => void;
 }> = ({
   publishers,
@@ -59,6 +60,7 @@ export const SysAdminConsole: React.FC<{
   embedded = false,
   tab,
   showInviteModalControlled,
+  onOpenInviteModal,
   onCloseInviteModal,
 }) => {
   const {
@@ -72,9 +74,17 @@ export const SysAdminConsole: React.FC<{
   const setActiveTab = setInternalActiveTab;
 
   const [internalShowInviteModal, setInternalShowInviteModal] = useState(false);
-  const showInviteModal = showInviteModalControlled !== undefined ? showInviteModalControlled : internalShowInviteModal;
+
+  useEffect(() => {
+    if (showInviteModalControlled !== undefined) {
+      setInternalShowInviteModal(showInviteModalControlled);
+    }
+  }, [showInviteModalControlled]);
+
+  const showInviteModal = Boolean(showInviteModalControlled || internalShowInviteModal);
   const setShowInviteModal = (val: boolean) => {
     setInternalShowInviteModal(val);
+    if (val && onOpenInviteModal) onOpenInviteModal();
     if (!val && onCloseInviteModal) onCloseInviteModal();
   };
   const [email, setEmail] = useState('');

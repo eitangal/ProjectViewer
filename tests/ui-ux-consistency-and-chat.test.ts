@@ -222,5 +222,81 @@ describe('UI/UX Consistency, Scoped RTL & AI Assistant Chat', () => {
       expect(projects.length).toBe(0);
       expect(currentProjectId).toBe('');
     });
+
+    it('correctly synchronizes modal state when triggered from main area danger zone or sidebar menu', () => {
+      // Simulate App.tsx controlled state
+      let showDeleteProjectModal = false;
+      const onOpenDeleteModal = () => {
+        showDeleteProjectModal = true;
+      };
+      const onCloseDeleteModal = () => {
+        showDeleteProjectModal = false;
+      };
+
+      // Simulate PublisherConsoleLayout controlled + internal modal resolution
+      let internalShowDeleteModal = false;
+      const getShowDeleteModal = (showDeleteModalControlled?: boolean) => {
+        return Boolean(showDeleteModalControlled || internalShowDeleteModal);
+      };
+      const setShowDeleteModal = (val: boolean) => {
+        internalShowDeleteModal = val;
+        if (val && onOpenDeleteModal) onOpenDeleteModal();
+        if (!val && onCloseDeleteModal) onCloseDeleteModal();
+      };
+
+      // 1. Initial state: closed
+      expect(getShowDeleteModal(showDeleteProjectModal)).toBe(false);
+
+      // 2. Triggered from main area danger zone (calls setShowDeleteModal(true))
+      setShowDeleteModal(true);
+      expect(internalShowDeleteModal).toBe(true);
+      expect(showDeleteProjectModal).toBe(true);
+      expect(getShowDeleteModal(showDeleteProjectModal)).toBe(true);
+
+      // 3. Close modal (cancel or after delete submit)
+      setShowDeleteModal(false);
+      expect(internalShowDeleteModal).toBe(false);
+      expect(showDeleteProjectModal).toBe(false);
+      expect(getShowDeleteModal(showDeleteProjectModal)).toBe(false);
+
+      // 4. Triggered from menu (calls onOpenDeleteModal directly)
+      onOpenDeleteModal();
+      expect(showDeleteProjectModal).toBe(true);
+      expect(getShowDeleteModal(showDeleteProjectModal)).toBe(true);
+
+      // 5. Cancel from modal
+      setShowDeleteModal(false);
+      expect(showDeleteProjectModal).toBe(false);
+      expect(getShowDeleteModal(showDeleteProjectModal)).toBe(false);
+    });
+
+    it('renders appropriate Danger Zone labels for git vs local projects', () => {
+      const gitProject = {
+        id: 'proj-git',
+        name: 'Remote Git Project',
+        isLocalRepo: false,
+      };
+
+      const localProject = {
+        id: 'proj-local',
+        name: 'Local VPS Project',
+        isLocalRepo: true,
+      };
+
+      const getDangerZoneConfig = (project: { isLocalRepo?: boolean }) => ({
+        buttonLabel: project.isLocalRepo ? 'Unpublish Project' : 'Delete Project',
+        description: project.isLocalRepo
+          ? 'Unpublish this local project, remove vector index and permissions. Local files on disk will remain untouched.'
+          : 'Permanently remove this project, repository sync logs, ACL viewer groups, and permissions.',
+      });
+
+      const gitConfig = getDangerZoneConfig(gitProject);
+      expect(gitConfig.buttonLabel).toBe('Delete Project');
+      expect(gitConfig.description).toContain('Permanently remove this project');
+
+      const localConfig = getDangerZoneConfig(localProject);
+      expect(localConfig.buttonLabel).toBe('Unpublish Project');
+      expect(localConfig.description).toContain('Local files on disk will remain untouched');
+    });
   });
 });

@@ -264,9 +264,18 @@ export function MainApp() {
         }}
         activeView={activeMainView}
         onSelectView={(v) => setActiveMainView(v as ActiveMainView)}
-        onCreateProject={() => setShowCreateProjectModal(true)}
-        onDeleteProject={() => setShowDeleteProjectModal(true)}
-        onInvitePublisher={() => setShowInvitePublisherModal(true)}
+        onCreateProject={() => {
+          setActiveMainView('publisher-sync');
+          setShowCreateProjectModal(true);
+        }}
+        onDeleteProject={() => {
+          setActiveMainView('publisher-sync');
+          setShowDeleteProjectModal(true);
+        }}
+        onInvitePublisher={() => {
+          setActiveMainView('admin-overview');
+          setShowInvitePublisherModal(true);
+        }}
         isBrevoConfigured={isBrevoConfigured}
         tree={treeData?.tree || []}
         isLoading={isTreeLoading}
@@ -297,6 +306,7 @@ export function MainApp() {
           embedded={true}
           tab={activeMainView === 'admin-smtp' ? 'smtp' : 'overview'}
           showInviteModalControlled={showInvitePublisherModal}
+          onOpenInviteModal={() => setShowInvitePublisherModal(true)}
           onCloseInviteModal={() => setShowInvitePublisherModal(false)}
           publishers={publishersData?.publishers || []}
           telemetry={telemetryData}
@@ -335,8 +345,10 @@ export function MainApp() {
           embedded={true}
           tab={activeMainView.replace('publisher-', '') as any}
           showCreateModalControlled={showCreateProjectModal}
+          onOpenCreateModal={() => setShowCreateProjectModal(true)}
           onCloseCreateModal={() => setShowCreateProjectModal(false)}
           showDeleteModalControlled={showDeleteProjectModal}
+          onOpenDeleteModal={() => setShowDeleteProjectModal(true)}
           onCloseDeleteModal={() => setShowDeleteProjectModal(false)}
           projects={projects}
           activeProject={activeProject}

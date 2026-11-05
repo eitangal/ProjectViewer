@@ -10,6 +10,8 @@ import {
   HardDrive,
   Info,
   Trash2,
+  FolderSync,
+  ExternalLink,
 } from 'lucide-react';
 import { ProjectSummary } from '@/shared/types.js';
 
@@ -26,6 +28,13 @@ export const SyncAndRepoTab: React.FC<{
   const [patInput, setPatInput] = useState('');
   const [branchInput, setBranchInput] = useState(project.branch);
   const [syncInterval, setSyncInterval] = useState(project.syncIntervalMinutes);
+
+  // Additional Copy Location State
+  const [additionalPathInput, setAdditionalPathInput] = useState(project.additionalCopyPath || '');
+  const [autoCopyInput, setAutoCopyInput] = useState(project.autoCopyOnSync !== false);
+  const [copyModeInput, setCopyModeInput] = useState<'WORKING_TREE' | 'FULL_REPO'>(project.copyMode || 'WORKING_TREE');
+  const [isCopying, setIsCopying] = useState(false);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
 
   const webhookUrl = `${window.location.origin}/api/webhooks/github/${project.id}`;
 
@@ -62,6 +71,47 @@ export const SyncAndRepoTab: React.FC<{
     alert('Repository settings saved successfully.');
   };
 
+  const handleCopyToLocation = async () => {
+    const dest = additionalPathInput.trim() || project.additionalCopyPath;
+    if (!dest) {
+      alert('Please specify a destination folder path on the VPS.');
+      return;
+    }
+    setIsCopying(true);
+    setCopyMessage(null);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/copy-to-location`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetPath: dest,
+          copyMode: copyModeInput,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to copy project');
+      setCopyMessage(`Copied ${data.filesCount} files to "${dest}" in ${data.durationMs}ms`);
+      await onUpdateProject({
+        additionalCopyPath: dest,
+        copyMode: copyModeInput,
+        autoCopyOnSync: autoCopyInput,
+      });
+    } catch (err: any) {
+      setCopyMessage(`Copy failed: ${err.message || 'Error'}`);
+    } finally {
+      setIsCopying(false);
+    }
+  };
+
+  const handleSaveAdditionalLocation = async () => {
+    await onUpdateProject({
+      additionalCopyPath: additionalPathInput.trim() || undefined,
+      copyMode: copyModeInput,
+      autoCopyOnSync: autoCopyInput,
+    });
+    alert('Additional copy location settings updated.');
+  };
+
   return (
     <div className="flex flex-col gap-6 p-2 max-w-4xl mx-auto">
       {/* Sync Status Card */}
@@ -84,7 +134,22 @@ export const SyncAndRepoTab: React.FC<{
                 ? 'Sync Failed'
                 : 'Synced & Active'}
             </span>
+            {project.isLocalRepo ? (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-sky-950 text-sky-300 border border-sky-800">
+                Local VPS Clone
+              </span>
+            ) : (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-indigo-950 text-indigo-300 border border-indigo-800">
+                Remote Git
+              </span>
+            )}
           </div>
+
+          {project.isLocalRepo && (
+            <div className="text-[11px] text-slate-400 font-mono">
+              Source Path: <span className="text-slate-200">{project.localSourcePath || project.repoUrl}</span>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 font-mono mt-1">
             <span className="flex items-center gap-1 text-slate-300">
@@ -223,6 +288,101 @@ export const SyncAndRepoTab: React.FC<{
         </button>
       </div>
 
+      {/* Additional Copy Location Card */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col gap-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <FolderSync size={16} className="text-indigo-400" />
+              <h3 className="text-sm font-semibold text-slate-100">Additional Filesystem Location</h3>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              Export and copy the materialized repository files to an additional target directory path on the VPS.
+            </p>
+          </div>
+          {project.lastCopiedAt && (
+            <div className="text-[11px] text-slate-400 font-mono">
+              Last Copied:{' '}
+              <span className={project.lastCopyStatus === 'SUCCESS' ? 'text-emerald-400' : 'text-rose-400'}>
+                {new Date(project.lastCopiedAt).toLocaleTimeString()} ({project.lastCopyStatus})
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-slate-300">Target Directory on VPS</label>
+            <input
+              type="text"
+              value={additionalPathInput}
+              onChange={(e) => setAdditionalPathInput(e.target.value)}
+              placeholder="/home/agydev/backup/govlabs11-pmo"
+              className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-4 pt-1">
+            <div className="flex items-center gap-4 text-xs text-slate-300">
+              <span className="text-slate-400 text-[11px]">Format:</span>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="tabCopyMode"
+                  checked={copyModeInput === 'WORKING_TREE'}
+                  onChange={() => setCopyModeInput('WORKING_TREE')}
+                  className="text-indigo-600 focus:ring-0"
+                />
+                <span className="text-[11px]">Clean Export</span>
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="radio"
+                  name="tabCopyMode"
+                  checked={copyModeInput === 'FULL_REPO'}
+                  onChange={() => setCopyModeInput('FULL_REPO')}
+                  className="text-indigo-600 focus:ring-0"
+                />
+                <span className="text-[11px]">Full Repo (.git)</span>
+              </label>
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer text-[11px] text-slate-400">
+              <input
+                type="checkbox"
+                checked={autoCopyInput}
+                onChange={(e) => setAutoCopyInput(e.target.checked)}
+                className="rounded border-slate-700 text-indigo-600 focus:ring-0"
+              />
+              <span>Auto-copy on Git sync</span>
+            </label>
+          </div>
+
+          {copyMessage && (
+            <p className="text-xs text-indigo-400 font-medium">{copyMessage}</p>
+          )}
+
+          <div className="flex items-center gap-2.5 pt-2">
+            <button
+              type="button"
+              disabled={isCopying || !additionalPathInput.trim()}
+              onClick={handleCopyToLocation}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-medium transition-colors flex items-center gap-1.5 shadow-md shadow-indigo-600/20"
+            >
+              <FolderSync size={13} className={isCopying ? 'animate-spin' : ''} />
+              <span>{isCopying ? 'Copying...' : 'Copy to Location Now'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveAdditionalLocation}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition-colors"
+            >
+              Save Settings
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* GitHub Webhook Trigger Card */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col gap-4">
         <div>
@@ -316,13 +476,15 @@ export const SyncAndRepoTab: React.FC<{
         )}
       </div>
 
-      {/* Danger Zone: Delete Project */}
+      {/* Danger Zone: Delete Project / Unpublish Project */}
       {onDeleteProject && (
         <div className="bg-rose-950/20 border border-rose-900/40 rounded-2xl p-6 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h3 className="text-sm font-semibold text-rose-300">Danger Zone</h3>
             <p className="text-xs text-rose-400/80 mt-1">
-              Permanently remove this project, repository sync logs, ACL viewer groups, and permissions.
+              {project.isLocalRepo
+                ? 'Unpublish this local project, remove vector index and permissions. Local files on disk will remain untouched.'
+                : 'Permanently remove this project, repository sync logs, ACL viewer groups, and permissions.'}
             </p>
           </div>
           <button
@@ -331,7 +493,7 @@ export const SyncAndRepoTab: React.FC<{
             className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-medium rounded-xl text-xs transition-colors shrink-0 flex items-center gap-1.5 shadow-sm"
           >
             <Trash2 size={14} />
-            <span>Delete Project</span>
+            <span>{project.isLocalRepo ? 'Unpublish Project' : 'Delete Project'}</span>
           </button>
         </div>
       )}

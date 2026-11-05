@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { FileDelta, RepoFileEntry } from '@/shared/types.js';
+import { FileDelta, RepoFileEntry, RepoFileEntryWithSha } from '@/shared/types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -29,16 +29,19 @@ export class BareGitManager {
 
   /**
    * Initializes a bare clone or fetches the latest commit on the target branch.
+   * Supports both remote HTTPS repositories and local VPS directory clones.
    * Returns the newly fetched HEAD commit SHA.
    */
   public async syncBareRepo(
     projectId: string,
     repoUrl: string,
     branch: string = 'main',
-    githubPat?: string
+    githubPat?: string,
+    isLocal: boolean = false
   ): Promise<string> {
     const repoDir = this.getRepoDir(projectId);
-    const authArgs = this.buildAuthHeader(githubPat);
+    const isLocalPath = isLocal || repoUrl.startsWith('/') || repoUrl.startsWith('file://');
+    const authArgs = isLocalPath ? ['-c', 'safe.directory=*'] : this.buildAuthHeader(githubPat);
 
     const exists = await fs
       .stat(repoDir)
@@ -47,36 +50,57 @@ export class BareGitManager {
 
     if (!exists) {
       await fs.mkdir(path.dirname(repoDir), { recursive: true });
-      await execFileAsync('git', [
-        '-c',
-        'safe.directory=*',
-        ...authArgs,
-        'clone',
-        '--bare',
-        '--depth',
-        '2',
-        '--single-branch',
-        '--branch',
-        branch,
-        repoUrl,
-        repoDir,
-      ]);
+      const cloneArgs = isLocalPath
+        ? [
+            '-c',
+            'safe.directory=*',
+            'clone',
+            '--bare',
+            '--single-branch',
+            '--branch',
+            branch,
+            repoUrl,
+            repoDir,
+          ]
+        : [
+            '-c',
+            'safe.directory=*',
+            ...authArgs,
+            'clone',
+            '--bare',
+            '--depth',
+            '2',
+            '--single-branch',
+            '--branch',
+            branch,
+            repoUrl,
+            repoDir,
+          ];
+
+      await execFileAsync('git', cloneArgs);
     } else {
-      await execFileAsync(
-        'git',
-        [
-          '-c',
-          'safe.directory=*',
-          ...authArgs,
-          'fetch',
-          'origin',
-          `${branch}:${branch}`,
-          '--depth',
-          '2',
-          '--prune',
-        ],
-        { cwd: repoDir }
-      );
+      const fetchArgs = isLocalPath
+        ? [
+            '-c',
+            'safe.directory=*',
+            'fetch',
+            'origin',
+            `${branch}:${branch}`,
+            '--prune',
+          ]
+        : [
+            '-c',
+            'safe.directory=*',
+            ...authArgs,
+            'fetch',
+            'origin',
+            `${branch}:${branch}`,
+            '--depth',
+            '2',
+            '--prune',
+          ];
+
+      await execFileAsync('git', fetchArgs, { cwd: repoDir });
     }
 
     const { stdout } = await execFileAsync('git', ['-c', 'safe.directory=*', 'rev-parse', branch], { cwd: repoDir });
@@ -136,6 +160,42 @@ export class BareGitManager {
     }
 
     this.fileCache.set(cacheKey, entries);
+    return entries;
+  }
+
+  /**
+   * Lists all files with their byte sizes and Git 40-char blob object SHAs (`git ls-tree -r -l --full-tree`).
+   * Used for deterministic snapshot comparisons and incremental RAG delta processing.
+   */
+  public async listRepoFilesWithShas(projectId: string, commitSha: string): Promise<RepoFileEntryWithSha[]> {
+    const repoDir = this.getRepoDir(projectId);
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-c', 'safe.directory=*', '-c', 'core.quotePath=false', 'ls-tree', '-r', '-l', '--full-tree', commitSha],
+      { cwd: repoDir, maxBuffer: 25 * 1024 * 1024 }
+    );
+
+    const entries: RepoFileEntryWithSha[] = [];
+    for (const line of stdout.split('\n')) {
+      if (!line.trim()) continue;
+      // Format: "<mode> <type> <blobSha> <sizeBytes>\t<filePath>"
+      let [meta, filePath] = line.split('\t');
+      if (!meta || !filePath) continue;
+
+      filePath = filePath.trim();
+      if (filePath.startsWith('"') && filePath.endsWith('"')) {
+        filePath = filePath.slice(1, -1);
+      }
+
+      const parts = meta.trim().split(/\s+/);
+      const type = parts[1];
+      const blobSha = parts[2];
+      const sizeBytes = parseInt(parts[3], 10);
+      if (type === 'blob' && filePath && blobSha && !Number.isNaN(sizeBytes)) {
+        entries.push({ filePath, blobSha, sizeBytes });
+      }
+    }
+
     return entries;
   }
 

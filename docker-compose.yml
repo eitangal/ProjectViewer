@@ -16,6 +16,10 @@ services:
       - BREVO_SENDER_NAME=${BREVO_SENDER_NAME:-GitLens Portal}
     volumes:
       - ./data:/var/lib/gitportal/data
+      - /home:/home
+      - /opt:/opt
+      - /var/www:/var/www
+      - /tmp:/tmp
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 15s

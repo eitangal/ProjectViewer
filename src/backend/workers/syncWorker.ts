@@ -8,7 +8,8 @@ import {
 } from '../services/geminiRagService.js';
 import { decryptSecret } from '../utils/crypto.js';
 import { resolveAuthorizedFiles } from '../services/aclMatcher.js';
-import { GroupAclRule } from '@/shared/types.js';
+import { GroupAclRule, RepoFileEntryWithSha } from '@/shared/types.js';
+import { ProjectCopierService } from '../services/projectCopier.js';
 
 export interface RetrievedChunk {
   filePath: string;
@@ -24,7 +25,8 @@ export class ProjectSyncAndRagOrchestrator {
   constructor(
     private readonly db: Database.Database,
     private readonly gitManager: BareGitManager,
-    private readonly geminiService: GeminiRagService
+    private readonly geminiService: GeminiRagService,
+    private readonly projectCopier?: ProjectCopierService
   ) {}
 
   /**
@@ -67,17 +69,19 @@ export class ProjectSyncAndRagOrchestrator {
         : undefined;
 
       // 1. Fetch bare repository and resolve HEAD SHA
+      const isLocal = !!project.is_local_repo;
       const newSha = await this.gitManager.syncBareRepo(
         projectId,
         project.repo_url,
         project.branch,
-        githubPat
+        githubPat,
+        isLocal
       );
 
       // Clear cache and count total files in HEAD commit
       this.gitManager.clearCache(projectId);
-      const allRepoFiles = await this.gitManager.listRepoFiles(projectId, newSha);
-      const totalFiles = allRepoFiles.length;
+      const allRepoFilesWithShas = await this.gitManager.listRepoFilesWithShas(projectId, newSha);
+      const totalFiles = allRepoFilesWithShas.length;
 
       // Check repo disk usage against publisher quota
       const diskBytes = await this.gitManager.getRepoDiskUsageBytes(projectId);
@@ -90,54 +94,88 @@ export class ProjectSyncAndRagOrchestrator {
       const oldSha = project.last_synced_sha;
       let indexedFiles = 0;
 
-      // 2. Compute file delta between oldSha and newSha
-      let deltas: { status: 'A' | 'M' | 'D'; filePath: string }[] = [];
-      if (options?.forceReindex || !oldSha) {
-        deltas = allRepoFiles.map((f) => ({ status: 'A' as const, filePath: f.filePath }));
-      } else {
-        deltas = await this.gitManager.getCommitDelta(
-          projectId,
-          oldSha,
-          newSha
-        );
-      }
+      // 2. Incremental RAG Directory Tree Snapshot Diffing
+      if (geminiKey) {
+        const currentMap = new Map<string, RepoFileEntryWithSha>();
+        for (const f of allRepoFilesWithShas) {
+          currentMap.set(f.filePath, f);
+        }
 
-      // If user provided a Gemini key and no chunks exist yet, auto-trigger indexing for all files
-      const existingChunkCount = (this.db
-        .prepare(`SELECT COUNT(*) as cnt FROM doc_chunks WHERE project_id = ?`)
-        .get(projectId) as any)?.cnt ?? 0;
+        const prevSnapshots = this.db
+          .prepare(`SELECT file_path, blob_sha, size_bytes FROM rag_file_snapshots WHERE project_id = ?`)
+          .all(projectId) as { file_path: string; blob_sha: string; size_bytes: number }[];
 
-      if (geminiKey && existingChunkCount === 0 && deltas.length === 0) {
-        deltas = allRepoFiles.map((f) => ({ status: 'A' as const, filePath: f.filePath }));
-      }
+        const prevMap = new Map<string, { blob_sha: string; size_bytes: number }>();
+        for (const s of prevSnapshots) {
+          prevMap.set(s.file_path, s);
+        }
 
-      // 3. If Publisher provided a Gemini API key, incrementally update embeddings
-      if (geminiKey && deltas.length > 0) {
-        const pathsToRemove = deltas.map((d) => d.filePath);
+        // Determine Added, Modified, Deleted
+        const addedTargets: RepoFileEntryWithSha[] = [];
+        const modifiedTargets: RepoFileEntryWithSha[] = [];
+        const pathsToDelete: string[] = [];
 
-        // Delete old chunks and vectors for Modified ('M') and Deleted ('D') files
-        const deleteTx = this.db.transaction((paths: string[]) => {
-          const selectIds = this.db.prepare(
-            `SELECT id FROM doc_chunks WHERE project_id = ? AND file_path = ?`
-          );
-          const delVec = this.db.prepare(`DELETE FROM vec_chunks WHERE chunk_id = ?`);
-          const delChunk = this.db.prepare(`DELETE FROM doc_chunks WHERE id = ?`);
-
-          for (const p of paths) {
-            const rows = selectIds.all(projectId, p) as { id: number }[];
-            for (const r of rows) {
-              delVec.run(r.id);
-              delChunk.run(r.id);
+        if (options?.forceReindex) {
+          // Force re-indexing of all indexable files
+          for (const f of allRepoFilesWithShas) {
+            if (isIndexableFile(f.filePath)) {
+              addedTargets.push(f);
             }
           }
-        });
-        deleteTx(pathsToRemove);
+          for (const s of prevSnapshots) {
+            pathsToDelete.push(s.file_path);
+          }
+        } else {
+          // Compare current HEAD tree vs stored snapshot
+          for (const [filePath, currentEntry] of currentMap.entries()) {
+            if (!isIndexableFile(filePath)) continue;
 
-        // Chunk and embed Added ('A') and Modified ('M') files
-        const upsertTargets = deltas.filter(
-          (d) => (d.status === 'A' || d.status === 'M') && isIndexableFile(d.filePath)
-        );
+            const prevEntry = prevMap.get(filePath);
+            if (!prevEntry) {
+              // File is newly added
+              addedTargets.push(currentEntry);
+            } else if (prevEntry.blob_sha !== currentEntry.blobSha) {
+              // File content was modified
+              modifiedTargets.push(currentEntry);
+              pathsToDelete.push(filePath);
+            }
+            // else: identical blobSha -> UNCHANGED! Skip completely.
+          }
 
+          // Check for files deleted from repository
+          for (const s of prevSnapshots) {
+            if (!currentMap.has(s.file_path)) {
+              pathsToDelete.push(s.file_path);
+            }
+          }
+        }
+
+        // 3. Delete old chunks & vectors for modified/deleted files
+        if (pathsToDelete.length > 0) {
+          const deleteTx = this.db.transaction((paths: string[]) => {
+            const selectIds = this.db.prepare(
+              `SELECT id FROM doc_chunks WHERE project_id = ? AND file_path = ?`
+            );
+            const delVec = this.db.prepare(`DELETE FROM vec_chunks WHERE chunk_id = ?`);
+            const delChunk = this.db.prepare(`DELETE FROM doc_chunks WHERE id = ?`);
+            const delSnapshot = this.db.prepare(
+              `DELETE FROM rag_file_snapshots WHERE project_id = ? AND file_path = ?`
+            );
+
+            for (const p of paths) {
+              const rows = selectIds.all(projectId, p) as { id: number }[];
+              for (const r of rows) {
+                delVec.run(r.id);
+                delChunk.run(r.id);
+              }
+              delSnapshot.run(projectId, p);
+            }
+          });
+          deleteTx(pathsToDelete);
+        }
+
+        // 4. Chunk & embed Added and Modified files only
+        const targetsToEmbed = [...addedTargets, ...modifiedTargets];
         const insertChunk = this.db.prepare(`
           INSERT INTO doc_chunks (project_id, file_path, start_line, end_line, content)
           VALUES (?, ?, ?, ?, ?)
@@ -145,8 +183,17 @@ export class ProjectSyncAndRagOrchestrator {
         const insertVec = this.db.prepare(`
           INSERT INTO vec_chunks (chunk_id, embedding) VALUES (?, ?)
         `);
+        const upsertSnapshot = this.db.prepare(`
+          INSERT INTO rag_file_snapshots (project_id, file_path, blob_sha, size_bytes, chunk_count, last_indexed_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(project_id, file_path) DO UPDATE SET
+            blob_sha = excluded.blob_sha,
+            size_bytes = excluded.size_bytes,
+            chunk_count = excluded.chunk_count,
+            last_indexed_at = excluded.last_indexed_at
+        `);
 
-        for (const item of upsertTargets) {
+        for (const item of targetsToEmbed) {
           try {
             const rawText = await this.gitManager.readFileBlob(
               projectId,
@@ -154,7 +201,11 @@ export class ProjectSyncAndRagOrchestrator {
               item.filePath
             );
             const chunks = chunkFileContent(item.filePath, rawText);
-            if (chunks.length === 0) continue;
+            if (chunks.length === 0) {
+              // Record in snapshot with 0 chunks so it's not repeatedly checked
+              upsertSnapshot.run(projectId, item.filePath, item.blobSha, item.sizeBytes, 0, Date.now());
+              continue;
+            }
 
             const embeddings = await this.geminiService.embedChunks(
               geminiKey,
@@ -177,12 +228,37 @@ export class ProjectSyncAndRagOrchestrator {
                   new Uint8Array(embeddings[i].buffer)
                 );
               }
+              upsertSnapshot.run(
+                projectId,
+                item.filePath,
+                item.blobSha,
+                item.sizeBytes,
+                chunks.length,
+                Date.now()
+              );
             });
             insertFileTx();
             indexedFiles++;
           } catch (fileErr) {
             console.error(`Failed to index file ${item.filePath}:`, fileErr);
           }
+        }
+      }
+
+      // 5. Automatic Copy to Additional Location if configured
+      if (project.additional_copy_path && project.auto_copy_on_sync && this.projectCopier) {
+        try {
+          await this.projectCopier.copyProjectToLocation(
+            projectId,
+            project.additional_copy_path,
+            {
+              commitSha: newSha,
+              copyMode: project.copy_mode,
+              localSourcePath: project.local_source_path,
+            }
+          );
+        } catch (copyErr) {
+          console.error(`Failed to auto-copy project ${projectId} to ${project.additional_copy_path}:`, copyErr);
         }
       }
 
