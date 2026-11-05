@@ -91,7 +91,9 @@ export function initSchema(db: Database.Database): void {
       project_id TEXT,
       expires_at INTEGER NOT NULL,
       attempts INTEGER NOT NULL DEFAULT 0,
-      consumed_at INTEGER
+      consumed_at INTEGER,
+      token_consumed_at INTEGER,
+      otp_consumed_at INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_challenges_email ON auth_challenges(email);
 
@@ -192,5 +194,11 @@ export function initSchema(db: Database.Database): void {
   } catch {}
   try {
     db.exec(`ALTER TABLE projects ADD COLUMN last_copy_error TEXT;`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE auth_challenges ADD COLUMN token_consumed_at INTEGER;`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE auth_challenges ADD COLUMN otp_consumed_at INTEGER;`);
   } catch {}
 }

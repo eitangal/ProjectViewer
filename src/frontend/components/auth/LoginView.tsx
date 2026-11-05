@@ -8,10 +8,10 @@ export const LoginView: React.FC<{
   const [email, setEmail] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [step, setStep] = useState<'email' | 'otp'>('email');
+  const [pendingMagicToken, setPendingMagicToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
-  const hasVerifiedToken = useRef(false);
 
   // Check URL query parameters on page load
   useEffect(() => {
@@ -40,29 +40,36 @@ export const LoginView: React.FC<{
       }
     }
 
-    if (magicToken && !hasVerifiedToken.current) {
-      hasVerifiedToken.current = true;
-      setIsLoading(true);
-      fetch('/api/auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ magicToken }),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.authenticated) {
-            window.history.replaceState({}, '', window.location.pathname);
-            onLoginSuccess(data.user, data.redirectProjectId);
-          } else {
-            setErrorMessage(data.error || 'Magic link verification failed.');
-          }
-        })
-        .catch((err) => {
-          setErrorMessage(err.message || 'Verification failed');
-        })
-        .finally(() => setIsLoading(false));
+    if (magicToken) {
+      // Require explicit user confirmation before consuming the token via POST.
+      // Automated email scanners (e.g. Microsoft Defender SafeLinks, URL detonation sandboxes)
+      // load redirected pages in headless browsers but never click interactive buttons.
+      setPendingMagicToken(magicToken);
     }
   }, [onLoginSuccess]);
+
+  const handleConfirmMagicLink = async () => {
+    if (!pendingMagicToken) return;
+    setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch('/api/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ magicToken: pendingMagicToken }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.authenticated) {
+        throw new Error(data.error || 'Magic link verification failed.');
+      }
+      window.history.replaceState({}, '', window.location.pathname);
+      onLoginSuccess(data.user, data.redirectProjectId);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Magic link verification failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleRequestCode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,7 +162,40 @@ export const LoginView: React.FC<{
           </div>
         )}
 
-        {step === 'email' ? (
+        {pendingMagicToken ? (
+          <div className="flex flex-col gap-4 text-center">
+            <p className="text-xs text-slate-300">
+              You opened a 1-click access link. Click below to confirm and sign in to your workspace.
+            </p>
+            <button
+              type="button"
+              onClick={handleConfirmMagicLink}
+              disabled={isLoading}
+              className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-medium py-3 rounded-xl transition-colors text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20"
+            >
+              {isLoading ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <>
+                  <ShieldCheck size={16} />
+                  <span>Confirm Sign In to Workspace</span>
+                  <ArrowRight size={14} />
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPendingMagicToken(null);
+                setStep('otp');
+                setErrorMessage(null);
+              }}
+              className="text-xs text-slate-400 hover:text-slate-200 transition-colors text-center"
+            >
+              Or enter verification code manually
+            </button>
+          </div>
+        ) : step === 'email' ? (
           <form onSubmit={handleRequestCode} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-slate-300">Work or Stakeholder Email</label>

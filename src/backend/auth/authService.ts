@@ -288,22 +288,24 @@ export class AuthService {
   ): Promise<VerifyResult> {
     const now = Date.now();
     let challenge: any;
+    let isMagicToken = false;
 
     if ('magicToken' in input && input.magicToken) {
+      isMagicToken = true;
       const tokenHash = sha256Hex(input.magicToken.trim());
       challenge = this.db
         .prepare(`
           SELECT * FROM auth_challenges
-          WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?
+          WHERE token_hash = ? AND (token_consumed_at IS NULL AND consumed_at IS NULL) AND expires_at > ?
         `)
         .get(tokenHash, now);
 
       if (!challenge) {
         const existing = this.db
-          .prepare(`SELECT consumed_at FROM auth_challenges WHERE token_hash = ?`)
-          .get(tokenHash) as { consumed_at?: number } | undefined;
+          .prepare(`SELECT consumed_at, token_consumed_at FROM auth_challenges WHERE token_hash = ?`)
+          .get(tokenHash) as { consumed_at?: number; token_consumed_at?: number } | undefined;
 
-        if (existing?.consumed_at) {
+        if (existing?.token_consumed_at || existing?.consumed_at) {
           throw new Error('This magic link has already been used. Please enter your email to request a new code.');
         }
         throw new Error('Invalid or expired magic link.');
@@ -318,11 +320,13 @@ export class AuthService {
 
       const expectedOtpHash = sha256Hex(`${email}:${enteredOtp}`);
 
-      // 1. Look for any active, unconsumed, unexpired challenge matching the entered OTP
+      // 1. Look for any active, unconsumed (by OTP), unexpired challenge matching the entered OTP.
+      // Even if token_consumed_at was set (e.g. by an automated email scanner prefetching the link),
+      // the human with the OTP in their inbox can still authenticate as long as the OTP itself is unconsumed!
       const matchingChallenge = this.db
         .prepare(`
           SELECT * FROM auth_challenges
-          WHERE email = ? AND consumed_at IS NULL AND expires_at > ? AND otp_hash = ?
+          WHERE email = ? AND (otp_consumed_at IS NULL) AND expires_at > ? AND otp_hash = ?
           ORDER BY expires_at DESC LIMIT 1
         `)
         .get(email, now, expectedOtpHash) as any;
@@ -337,7 +341,7 @@ export class AuthService {
         const latestActive = this.db
           .prepare(`
             SELECT * FROM auth_challenges
-            WHERE email = ? AND consumed_at IS NULL AND expires_at > ?
+            WHERE email = ? AND (otp_consumed_at IS NULL) AND expires_at > ?
             ORDER BY expires_at DESC LIMIT 1
           `)
           .get(email, now) as any;
@@ -359,8 +363,8 @@ export class AuthService {
           .get(email) as any;
 
         if (anyChallenge) {
-          if (anyChallenge.consumed_at) {
-            throw new Error('This verification code or login link has already been used. Please request a new code.');
+          if (anyChallenge.otp_consumed_at) {
+            throw new Error('This verification code has already been used. Please request a new code.');
           }
           if (anyChallenge.expires_at <= now) {
             throw new Error('Verification code expired. Please request a new code.');
@@ -379,14 +383,35 @@ export class AuthService {
 
     // Atomically consume challenge, retire any other pending challenges for this email, and mark user as ACTIVE
     const user = this.db.transaction(() => {
-      this.db
-        .prepare(`UPDATE auth_challenges SET consumed_at = ? WHERE id = ?`)
-        .run(now, challenge.id);
+      if (isMagicToken) {
+        this.db
+          .prepare(`UPDATE auth_challenges SET token_consumed_at = ?, consumed_at = ? WHERE id = ?`)
+          .run(now, now, challenge.id);
 
-      // Retire any sibling pending challenges for this user upon successful authentication
-      this.db
-        .prepare(`UPDATE auth_challenges SET consumed_at = ? WHERE email = ? AND consumed_at IS NULL`)
-        .run(now, challenge.email);
+        // Retire other pending magic tokens for this email, while preserving OTP codes
+        this.db
+          .prepare(`
+            UPDATE auth_challenges
+            SET token_consumed_at = COALESCE(token_consumed_at, ?)
+            WHERE email = ? AND token_consumed_at IS NULL
+          `)
+          .run(now, challenge.email);
+      } else {
+        this.db
+          .prepare(`UPDATE auth_challenges SET otp_consumed_at = ?, consumed_at = ? WHERE id = ?`)
+          .run(now, now, challenge.id);
+
+        // Retire any other pending challenges for this email upon successful OTP authentication
+        this.db
+          .prepare(`
+            UPDATE auth_challenges
+            SET otp_consumed_at = COALESCE(otp_consumed_at, ?),
+                token_consumed_at = COALESCE(token_consumed_at, ?),
+                consumed_at = COALESCE(consumed_at, ?)
+            WHERE email = ? AND (otp_consumed_at IS NULL OR token_consumed_at IS NULL OR consumed_at IS NULL)
+          `)
+          .run(now, now, now, challenge.email);
+      }
 
       this.db
         .prepare(`

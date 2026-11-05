@@ -207,4 +207,44 @@ describe('3. Passwordless Invitation & Verification Service (authService.ts)', (
 
     expect(result.user.globalRole).toBe('PUBLISHER');
   });
+
+  it('allows user to sign in with 6-digit OTP code even if magic link was already consumed by an automated scanner', async () => {
+    authService.bootstrapSysAdmin('admin@gitlens-portal.local');
+    const admin = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@gitlens-portal.local') as any;
+    const email = 'eitan@s-strategy.com';
+    await authService.invitePublisher(admin.id, email);
+
+    const challenge = await authService.requestLoginChallenge(email);
+    expect(challenge).toBeDefined();
+
+    // 1. Simulate an automated email scanner (e.g. Defender SafeLinks) consuming the magic link
+    const magicVerifyRes = await authService.verifyChallenge({
+      magicToken: challenge!.magicToken,
+    });
+    expect(magicVerifyRes.jwt).toBeTypeOf('string');
+
+    // Verify token_consumed_at is recorded
+    const row = db
+      .prepare('SELECT token_consumed_at, otp_consumed_at FROM auth_challenges WHERE email = ? ORDER BY expires_at DESC LIMIT 1')
+      .get(email) as any;
+    expect(row.token_consumed_at).toBeGreaterThan(0);
+
+    // 2. The human user opens the email and enters the 6-digit OTP code in the web interface
+    // OTP verification MUST succeed because the human entered the genuine OTP delivered to their inbox!
+    const otpVerifyRes = await authService.verifyChallenge({
+      email,
+      otpCode: challenge!.otpCode,
+    });
+
+    expect(otpVerifyRes.user.email).toBe(email);
+    expect(otpVerifyRes.jwt).toBeTypeOf('string');
+
+    // 3. Verifying the same OTP code again is rejected because otp_consumed_at is now set
+    await expect(
+      authService.verifyChallenge({
+        email,
+        otpCode: challenge!.otpCode,
+      })
+    ).rejects.toThrow(/already been used/i);
+  });
 });
