@@ -5,6 +5,7 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { SmartMarkdownLink } from './SmartMarkdownLink.js';
 import { MermaidBlock } from './MermaidBlock.js';
 import { useViewerStore } from '../../store/useViewerStore.js';
+import { resolveRepoLink } from '../../utils/resolveRepoLink.js';
 
 // Relax sanitize schema to permit custom classes, ids for anchors, and SVG/Mermaid containers
 const sanitizeSchema = {
@@ -17,7 +18,7 @@ const sanitizeSchema = {
 };
 
 export const MarkdownRenderer: React.FC<{ markdown: string }> = ({ markdown }) => {
-  const { direction } = useViewerStore();
+  const { direction, activeFilePath, projectId } = useViewerStore();
 
   return (
     <div
@@ -29,6 +30,32 @@ export const MarkdownRenderer: React.FC<{ markdown: string }> = ({ markdown }) =
         rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}
         components={{
           a: SmartMarkdownLink as any,
+          img({ src = '', alt, ...props }: any) {
+            let resolvedSrc = src;
+            if (src && !/^(https?:|data:|blob:)/i.test(src) && projectId) {
+              const resolved = resolveRepoLink(activeFilePath || '', src);
+              if (resolved.targetPath) {
+                resolvedSrc = `/api/viewer/${projectId}/raw/${encodeURI(resolved.targetPath)}`;
+              }
+            }
+
+            return (
+              <figure className="my-6 flex flex-col items-center">
+                <img
+                  src={resolvedSrc}
+                  alt={alt || ''}
+                  className="max-w-full h-auto rounded-xl border border-slate-800 shadow-xl bg-slate-900/50"
+                  loading="lazy"
+                  {...props}
+                />
+                {alt && (
+                  <figcaption className="mt-2 text-xs text-slate-400 italic text-center">
+                    {alt}
+                  </figcaption>
+                )}
+              </figure>
+            );
+          },
           code({ className, children, ...props }: any) {
             const match = /language-(\w+)/.exec(className || '');
             const language = match ? match[1] : '';

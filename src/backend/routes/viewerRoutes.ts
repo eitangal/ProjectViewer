@@ -79,17 +79,34 @@ export async function registerViewerRoutes(
     }
 
     try {
-      const content = await gitManager.readFileBlob(
-        projectId,
-        project.last_synced_sha,
-        normalizedPath
-      );
-      const fileEntry = allRepoFiles.find((f) => f.filePath === normalizedPath);
+      const isBinary = isBinaryFile(normalizedPath);
+      let content: string;
+      let sizeBytes: number;
+
+      if (isBinary) {
+        const buffer = await gitManager.readFileBlobBuffer(
+          projectId,
+          project.last_synced_sha,
+          normalizedPath
+        );
+        const mimeType = getMimeType(normalizedPath);
+        content = `data:${mimeType};base64,${buffer.toString('base64')}`;
+        sizeBytes = buffer.length;
+      } else {
+        content = await gitManager.readFileBlob(
+          projectId,
+          project.last_synced_sha,
+          normalizedPath
+        );
+        const fileEntry = allRepoFiles.find((f) => f.filePath === normalizedPath);
+        sizeBytes = fileEntry?.sizeBytes || Buffer.byteLength(content, 'utf8');
+      }
 
       return reply.send({
         path: normalizedPath,
         content,
-        sizeBytes: fileEntry?.sizeBytes || Buffer.byteLength(content, 'utf8'),
+        sizeBytes,
+        isBinary,
         commitSha: project.last_synced_sha,
       });
     } catch (err: any) {
@@ -98,15 +115,29 @@ export async function registerViewerRoutes(
   });
 
   // 3. Raw File Serving Endpoint with MIME types & Full Script Execution (VIE-03)
-  app.get('/api/viewer/:projectId/raw/*', viewerGuard, async (req, reply) => {
+  const handleRawFile = async (req: any, reply: any) => {
     const { projectId } = req.params as { projectId: string };
-    const rawPath = (req.params as any)['*'];
+    const rawUrlWithoutQuery = (req.raw.url || '').split('?')[0];
 
-    if (!rawPath) {
-      return reply.code(400).send({ error: 'File path parameter is required' });
+    // If client requested /api/viewer/:projectId/raw without trailing slash, redirect with trailing slash
+    // so relative resources inside HTML documents resolve properly against the directory URL
+    if (rawUrlWithoutQuery === `/api/viewer/${projectId}/raw`) {
+      return reply.redirect(`/api/viewer/${projectId}/raw/`, 302);
     }
 
-    const normalizedPath = rawPath.replace(/^\/+/, '');
+    const rawPath = (req.params as any)['*'] || '';
+    let normalizedPath = rawPath.replace(/^\/+/, '');
+
+    // Normalize potential Docsify or client routing artifact where index.html prefix is preserved
+    normalizedPath = normalizedPath.replace(/^index\.html\//, '').replace(/\/index\.html\//g, '/');
+
+    // Default to index.html if path is empty or ends with a slash
+    if (!normalizedPath || normalizedPath === '') {
+      normalizedPath = 'index.html';
+    } else if (normalizedPath.endsWith('/')) {
+      normalizedPath = `${normalizedPath}index.html`;
+    }
+
     const project = db
       .prepare(`SELECT id, last_synced_sha FROM projects WHERE id = ?`)
       .get(projectId) as any;
@@ -126,7 +157,7 @@ export async function registerViewerRoutes(
     }
 
     try {
-      const content = await gitManager.readFileBlob(
+      const buffer = await gitManager.readFileBlobBuffer(
         projectId,
         project.last_synced_sha,
         normalizedPath
@@ -134,11 +165,14 @@ export async function registerViewerRoutes(
 
       const mimeType = getMimeType(normalizedPath);
       reply.header('Content-Type', mimeType);
-      return reply.send(content);
+      return reply.send(buffer);
     } catch (err: any) {
       return reply.code(404).send({ error: 'File not found in repository commit' });
     }
-  });
+  };
+
+  app.get('/api/viewer/:projectId/raw', viewerGuard, handleRawFile);
+  app.get('/api/viewer/:projectId/raw/*', viewerGuard, handleRawFile);
 
   // 3. ACL-Scoped Viewer RAG Query (VIE-06, Flow B)
   app.post('/api/viewer/:projectId/rag/chat', viewerGuard, async (req, reply) => {
@@ -245,6 +279,19 @@ export async function registerViewerRoutes(
   });
 }
 
+const BINARY_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif',
+  'pdf',
+  'mp3', 'wav', 'ogg', 'mp4', 'webm',
+  'zip', 'tar', 'gz', 'bz2', '7z', 'rar',
+  'woff', 'woff2', 'ttf', 'eot', 'otf',
+]);
+
+function isBinaryFile(filePath: string): boolean {
+  const ext = filePath.split('.').pop()?.toLowerCase() || '';
+  return BINARY_EXTENSIONS.has(ext);
+}
+
 function getMimeType(filePath: string): string {
   const ext = filePath.split('.').pop()?.toLowerCase();
   switch (ext) {
@@ -269,6 +316,12 @@ function getMimeType(filePath: string): string {
       return 'image/gif';
     case 'webp':
       return 'image/webp';
+    case 'ico':
+      return 'image/x-icon';
+    case 'bmp':
+      return 'image/bmp';
+    case 'avif':
+      return 'image/avif';
     case 'mp3':
       return 'audio/mpeg';
     case 'wav':
@@ -283,6 +336,19 @@ function getMimeType(filePath: string): string {
       return 'application/pdf';
     case 'md':
       return 'text/markdown; charset=utf-8';
+    case 'yaml':
+    case 'yml':
+      return 'text/yaml; charset=utf-8';
+    case 'woff':
+      return 'font/woff';
+    case 'woff2':
+      return 'font/woff2';
+    case 'ttf':
+      return 'font/ttf';
+    case 'eot':
+      return 'application/vnd.ms-fontobject';
+    case 'otf':
+      return 'font/otf';
     default:
       return 'text/plain; charset=utf-8';
   }

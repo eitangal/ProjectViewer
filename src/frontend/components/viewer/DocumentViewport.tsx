@@ -5,6 +5,7 @@ import { MarkdownRenderer } from '../renderers/MarkdownRenderer.js';
 import { MermaidBlock } from '../renderers/MermaidBlock.js';
 import { OpenApiSpecRenderer } from '../renderers/OpenApiSpecRenderer.js';
 import { SandboxedHtmlRenderer } from '../renderers/SandboxedHtmlRenderer.js';
+import { ImageViewer } from '../renderers/ImageViewer.js';
 import { RawCodeRenderer } from '../renderers/RawCodeRenderer.js';
 import { FileQuestion, Lock, Loader2 } from 'lucide-react';
 
@@ -121,7 +122,20 @@ export const DocumentViewport: React.FC<{
     );
   }
 
-  // 3. Fluid Responsive Document & Code Viewport
+  // 3. Full-Bleed Image Viewport (PNG, JPG, SVG, WebP, GIF, etc.)
+  if (format === 'image' && viewMode !== 'raw') {
+    return (
+      <main ref={viewportRef} className={`flex-1 min-w-0 h-full w-full overflow-hidden flex flex-col bg-slate-950 ${hiddenClass}`}>
+        <ImageViewer
+          filePath={activeFilePath}
+          projectId={effectiveProjectId}
+          content={content}
+        />
+      </main>
+    );
+  }
+
+  // 4. Fluid Responsive Document & Code Viewport
   return (
     <main
       ref={viewportRef}

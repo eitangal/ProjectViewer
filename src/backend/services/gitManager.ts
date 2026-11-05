@@ -265,6 +265,24 @@ export class BareGitManager {
   }
 
   /**
+   * Reads a file blob directly from the bare repository into memory as a Buffer.
+   * Essential for binary files (images, PDFs, audio/video) to avoid UTF-8 string corruption.
+   */
+  public async readFileBlobBuffer(
+    projectId: string,
+    commitSha: string,
+    filePath: string
+  ): Promise<Buffer> {
+    const repoDir = this.getRepoDir(projectId);
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-c', 'safe.directory=*', '-c', 'core.quotePath=false', 'cat-file', 'blob', `${commitSha}:${filePath}`],
+      { cwd: repoDir, maxBuffer: 30 * 1024 * 1024, encoding: 'buffer' }
+    );
+    return stdout as Buffer;
+  }
+
+  /**
    * Calculates total disk usage in bytes for the project's bare repository directory.
    */
   public async getRepoDiskUsageBytes(projectId: string): Promise<number> {

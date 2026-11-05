@@ -20,6 +20,7 @@ import {
   Users,
   Sparkles,
   FolderGit2,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { FileTreeNode, ProjectSummary, ViewerGroupSummary } from '@/shared/types.js';
 import { useViewerStore } from '../../store/useViewerStore.js';
@@ -29,6 +30,9 @@ function getFileIcon(fileName: string) {
   if (ext === 'md' || ext === 'mdx') return <FileText size={15} className="text-sky-400 shrink-0" />;
   if (ext === 'mmd' || ext === 'mermaid') return <Layers size={15} className="text-emerald-400 shrink-0" />;
   if (ext === 'html' || ext === 'htm') return <Globe size={15} className="text-amber-400 shrink-0" />;
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif'].includes(ext || '')) {
+    return <ImageIcon size={15} className="text-purple-400 shrink-0" />;
+  }
   if (['yaml', 'yml', 'json'].includes(ext || '')) return <FileCode size={15} className="text-indigo-400 shrink-0" />;
   return <FileCode size={15} className="text-slate-400 shrink-0" />;
 }

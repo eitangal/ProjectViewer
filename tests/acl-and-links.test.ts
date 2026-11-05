@@ -138,6 +138,15 @@ describe('3. Multi-Format Detection (detectDocumentFormat.ts)', () => {
 
   it('detects HTML files', () => {
     expect(detectDocumentFormat('reports/coverage.html')).toBe('html');
+    expect(detectDocumentFormat('index.html')).toBe('html');
+  });
+
+  it('detects image files (PNG, JPG, SVG, WebP, GIF)', () => {
+    expect(detectDocumentFormat('docs/pmo/project_phases.png')).toBe('image');
+    expect(detectDocumentFormat('assets/logo.jpg')).toBe('image');
+    expect(detectDocumentFormat('assets/icon.svg')).toBe('image');
+    expect(detectDocumentFormat('assets/hero.webp')).toBe('image');
+    expect(detectDocumentFormat('assets/animation.gif')).toBe('image');
   });
 
   it('detects OpenAPI / Swagger specification files via content signature', () => {

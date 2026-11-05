@@ -10,11 +10,15 @@ export const SandboxedHtmlRenderer: React.FC<{
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
 
-  // Raw direct URL for opening in a separate tab if needed
-  const rawUrl =
-    projectId && filePath
-      ? `/api/viewer/${projectId}/raw/${encodeURI(filePath)}`
-      : null;
+  // Raw direct URL: for root index.html, load directory `/raw/` so Docsify & relative assets resolve naturally
+  const rawUrl = useMemo(() => {
+    if (!projectId || !filePath) return null;
+    if (filePath === 'index.html' || filePath.endsWith('/index.html')) {
+      const dir = filePath.replace(/index\.html$/, '');
+      return `/api/viewer/${projectId}/raw/${dir ? encodeURI(dir) : ''}`;
+    }
+    return `/api/viewer/${projectId}/raw/${encodeURI(filePath)}`;
+  }, [projectId, filePath]);
 
   const handleReload = () => {
     setIframeKey((prev) => prev + 1);
@@ -96,7 +100,8 @@ export const SandboxedHtmlRenderer: React.FC<{
         title="Interactive HTML Application Viewport"
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
         allow="autoplay; fullscreen; encrypted-media; camera; microphone"
-        srcDoc={processedHtml}
+        src={rawUrl || undefined}
+        srcDoc={!rawUrl ? processedHtml : undefined}
         className="w-full flex-1 border-0 h-full bg-slate-950"
       />
     </div>
