@@ -57,14 +57,64 @@ export function buildApp(config: AppConfig): {
 
   const app = fastify({ logger: false });
 
-  // Plugins
+  // Capture raw body for webhook HMAC verification while parsing JSON normally
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    try {
+      const rawStr = typeof body === 'string' ? body : body.toString('utf8');
+      (req as any).rawBody = rawStr;
+      const json = rawStr ? JSON.parse(rawStr) : {};
+      done(null, json);
+    } catch (err: any) {
+      err.statusCode = 400;
+      done(err, undefined);
+    }
+  });
+
+  // Strict CORS origin validation (H-4)
+  const allowedOrigins = new Set<string>([
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:3000',
+  ]);
+  if (config.portalBaseUrl) {
+    try {
+      allowedOrigins.add(new URL(config.portalBaseUrl).origin);
+    } catch {}
+  }
+  if (process.env.PORTAL_BASE_URL) {
+    try {
+      allowedOrigins.add(new URL(process.env.PORTAL_BASE_URL).origin);
+    } catch {}
+  }
+
   app.register(fastifyCors, {
-    origin: true,
+    origin: (origin, cb) => {
+      if (!origin || allowedOrigins.has(origin)) {
+        cb(null, true);
+      } else {
+        cb(null, false);
+      }
+    },
     credentials: true,
   });
 
   app.register(fastifyCookie, {
     secret: process.env.COOKIE_SECRET || 'gitlens-portal-cookie-secret-key-signature',
+  });
+
+  // Baseline security headers on all responses
+  app.addHook('onSend', async (_req, reply, payload) => {
+    if (!reply.getHeader('X-Content-Type-Options')) {
+      reply.header('X-Content-Type-Options', 'nosniff');
+    }
+    if (!reply.getHeader('Referrer-Policy')) {
+      reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    }
+    if (!reply.getHeader('X-Frame-Options')) {
+      reply.header('X-Frame-Options', 'SAMEORIGIN');
+    }
+    return payload;
   });
 
   // Health check

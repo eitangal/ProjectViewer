@@ -108,6 +108,7 @@ export const DocumentViewport: React.FC<{
           htmlContent={content}
           filePath={activeFilePath}
           projectId={effectiveProjectId}
+          activeHash={activeHash}
         />
       </main>
     );

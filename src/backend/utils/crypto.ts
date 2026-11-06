@@ -6,11 +6,19 @@ const ALGORITHM = 'aes-256-gcm';
 const DEFAULT_DEV_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 function getMasterKey(): Buffer {
-  const envKey = process.env.MASTER_ENCRYPTION_KEY || DEFAULT_DEV_KEY;
-  if (envKey.length !== 64) {
+  const envKey = process.env.MASTER_ENCRYPTION_KEY;
+  if (process.env.NODE_ENV === 'production' && !process.env.VITEST) {
+    if (!envKey || envKey === DEFAULT_DEV_KEY) {
+      throw new Error(
+        'CRITICAL SECURITY ERROR: MASTER_ENCRYPTION_KEY must be set to a unique 64-character hex string in production.'
+      );
+    }
+  }
+  const effectiveKey = envKey || DEFAULT_DEV_KEY;
+  if (!/^[0-9a-fA-F]{64}$/.test(effectiveKey)) {
     throw new Error('MASTER_ENCRYPTION_KEY must be a 64-character (32-byte) hex string');
   }
-  return Buffer.from(envKey, 'hex');
+  return Buffer.from(effectiveKey, 'hex');
 }
 
 /**
@@ -53,16 +61,18 @@ export function verifyGithubWebhookSignature(
   signatureHeader: string | undefined,
   secret: string
 ): boolean {
-  if (!signatureHeader || !signatureHeader.startsWith('sha256=')) {
+  if (!signatureHeader || !signatureHeader.startsWith('sha256=') || !secret) {
     return false;
   }
-  const expectedSig = signatureHeader.slice('sha256='.length);
+  const expectedSigHex = signatureHeader.slice('sha256='.length).trim();
+  if (!/^[0-9a-fA-F]{64}$/.test(expectedSigHex)) {
+    return false;
+  }
   const hmac = createHmac('sha256', secret);
   hmac.update(rawBody);
-  const computedSig = hmac.digest('hex');
+  const computedDigest = hmac.digest();
+  const expectedDigest = Buffer.from(expectedSigHex, 'hex');
 
-  const bufA = Buffer.from(expectedSig, 'utf8');
-  const bufB = Buffer.from(computedSig, 'utf8');
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
+  if (expectedDigest.length !== computedDigest.length) return false;
+  return timingSafeEqual(expectedDigest, computedDigest);
 }

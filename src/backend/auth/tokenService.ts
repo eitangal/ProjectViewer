@@ -6,7 +6,15 @@ const DEFAULT_JWT_SECRET = 'gitlens-portal-super-secret-jwt-signing-key-32-bytes
 const ISSUER = 'gitlens-portal';
 
 function getJwtSecret(): Uint8Array {
-  const secret = process.env.JWT_SECRET_KEY || DEFAULT_JWT_SECRET;
+  const envSecret = process.env.JWT_SECRET_KEY;
+  if (process.env.NODE_ENV === 'production' && !process.env.VITEST) {
+    if (!envSecret || envSecret === DEFAULT_JWT_SECRET || envSecret.length < 32) {
+      throw new Error(
+        'CRITICAL SECURITY ERROR: JWT_SECRET_KEY must be set to a unique secret of at least 32 characters in production.'
+      );
+    }
+  }
+  const secret = envSecret || DEFAULT_JWT_SECRET;
   return new TextEncoder().encode(secret);
 }
 

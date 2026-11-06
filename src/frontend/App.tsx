@@ -49,6 +49,7 @@ export function MainApp() {
     setPreviewGroupId,
     setAuthorizedPaths,
     navigateToFile,
+    resetSessionState,
   } = useViewerStore();
 
   const isSysAdmin = user?.globalRole === 'SYSADMIN' || user?.role === 'SYSADMIN';
@@ -98,19 +99,24 @@ export function MainApp() {
     }
   }, [isSysAdmin]);
 
-  // Read URL query params on mount
+  // Read URL deep link query params ONLY after authentication is verified (M-1)
   useEffect(() => {
+    if (!user) return;
     const params = new URLSearchParams(window.location.search);
+    const initialProjectId = params.get('projectId');
     const initialPath = params.get('path');
     const initialGroupId = params.get('previewGroupId');
+    if (initialProjectId) {
+      setProjectId(initialProjectId);
+    }
     if (initialGroupId) {
       setPreviewGroupId(initialGroupId);
     }
-    if (initialPath) {
+    if (initialPath && !initialPath.startsWith('//') && !initialPath.includes('://')) {
       navigateToFile(initialPath, window.location.hash.replace('#', '') || null);
       setActiveMainView('viewer');
     }
-  }, [navigateToFile, setPreviewGroupId]);
+  }, [user, navigateToFile, setPreviewGroupId, setProjectId]);
 
   // Projects query for all authenticated users (fetches both published and viewer projects)
   const { data: projectsData, refetch: refetchProjects } = useQuery<{ projects: ProjectSummary[] }>({
@@ -226,6 +232,8 @@ export function MainApp() {
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
+    resetSessionState();
+    queryClient.clear();
     setUser(null);
   };
 

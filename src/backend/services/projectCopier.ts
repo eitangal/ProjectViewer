@@ -2,7 +2,39 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { BareGitManager } from './gitManager.js';
+import { BareGitManager, validateCommitSha } from './gitManager.js';
+
+const FORBIDDEN_COPY_TARGETS = [
+  '/',
+  '/etc',
+  '/proc',
+  '/sys',
+  '/dev',
+  '/boot',
+  '/root',
+  '/bin',
+  '/sbin',
+  '/usr',
+  '/var/run',
+];
+
+export function validateCopyTargetPath(targetPath: string): string {
+  const trimmed = (targetPath || '').trim();
+  if (!trimmed || trimmed.startsWith('-')) {
+    throw new Error('Invalid target directory path');
+  }
+  const resolved = path.resolve(trimmed);
+  for (const prefix of FORBIDDEN_COPY_TARGETS) {
+    if (resolved === prefix || (prefix !== '/' && resolved.startsWith(`${prefix}/`))) {
+      throw new Error(`Copying to restricted system directory "${prefix}" is forbidden`);
+    }
+  }
+  const appSrcDir = path.resolve(process.cwd(), 'src');
+  if (resolved === appSrcDir || resolved.startsWith(`${appSrcDir}/`)) {
+    throw new Error('Copying into application source directory is forbidden');
+  }
+  return resolved;
+}
 
 export interface CopyResult {
   ok: boolean;
@@ -33,7 +65,18 @@ export class ProjectCopierService {
     }
   ): Promise<CopyResult> {
     const startTime = Date.now();
-    const resolvedTarget = path.resolve(targetPath.trim());
+    let resolvedTarget: string;
+    try {
+      resolvedTarget = validateCopyTargetPath(targetPath);
+    } catch (valErr: any) {
+      return {
+        ok: false,
+        targetPath,
+        filesCount: 0,
+        durationMs: 0,
+        error: valErr.message || 'Invalid target path',
+      };
+    }
 
     this.db
       .prepare(`UPDATE projects SET last_copy_status = 'COPYING', last_copy_error = NULL WHERE id = ?`)
@@ -47,7 +90,7 @@ export class ProjectCopierService {
 
       if (copyMode === 'FULL_REPO' && options?.localSourcePath) {
         // Full local clone replication (including .git)
-        const sourcePath = path.resolve(options.localSourcePath.trim());
+        const sourcePath = validateCopyTargetPath(options.localSourcePath);
         await fs.cp(sourcePath, resolvedTarget, { recursive: true, force: true });
         const entries = await fs.readdir(resolvedTarget);
         filesCount = entries.length;
@@ -62,6 +105,7 @@ export class ProjectCopierService {
           commit = project?.last_synced_sha || 'HEAD';
         }
         const targetCommit = commit || 'HEAD';
+        validateCommitSha(targetCommit);
 
         await new Promise<void>((resolve, reject) => {
           const gitProc = spawn('git', [
@@ -75,7 +119,13 @@ export class ProjectCopierService {
             targetCommit,
           ]);
 
-          const tarProc = spawn('tar', ['-x', '-C', resolvedTarget]);
+          const tarProc = spawn('tar', [
+            '-x',
+            '--no-same-owner',
+            '--no-same-permissions',
+            '-C',
+            resolvedTarget,
+          ]);
 
           let errorMsg = '';
           gitProc.stderr.on('data', (d) => {

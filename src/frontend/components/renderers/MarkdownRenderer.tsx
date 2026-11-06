@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { SmartMarkdownLink } from './SmartMarkdownLink.js';
 import { MermaidBlock } from './MermaidBlock.js';
@@ -17,6 +18,18 @@ const sanitizeSchema = {
   },
 };
 
+const slugifyHeading = (children: React.ReactNode, id?: string): string => {
+  if (id) return id;
+  const text = React.Children.toArray(children)
+    .map((c) => (typeof c === 'string' || typeof c === 'number' ? String(c) : ''))
+    .join('');
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/\s+/g, '-');
+};
+
 export const MarkdownRenderer: React.FC<{ markdown: string }> = ({ markdown }) => {
   const { direction, activeFilePath, projectId } = useViewerStore();
 
@@ -27,9 +40,33 @@ export const MarkdownRenderer: React.FC<{ markdown: string }> = ({ markdown }) =
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
         components={{
           a: SmartMarkdownLink as any,
+          h1({ id, children, ...props }: any) {
+            const headingId = slugifyHeading(children, id);
+            return <h1 id={headingId} {...props}>{children}</h1>;
+          },
+          h2({ id, children, ...props }: any) {
+            const headingId = slugifyHeading(children, id);
+            return <h2 id={headingId} {...props}>{children}</h2>;
+          },
+          h3({ id, children, ...props }: any) {
+            const headingId = slugifyHeading(children, id);
+            return <h3 id={headingId} {...props}>{children}</h3>;
+          },
+          h4({ id, children, ...props }: any) {
+            const headingId = slugifyHeading(children, id);
+            return <h4 id={headingId} {...props}>{children}</h4>;
+          },
+          h5({ id, children, ...props }: any) {
+            const headingId = slugifyHeading(children, id);
+            return <h5 id={headingId} {...props}>{children}</h5>;
+          },
+          h6({ id, children, ...props }: any) {
+            const headingId = slugifyHeading(children, id);
+            return <h6 id={headingId} {...props}>{children}</h6>;
+          },
           img({ src = '', alt, ...props }: any) {
             let resolvedSrc = src;
             if (src && !/^(https?:|data:|blob:)/i.test(src) && projectId) {

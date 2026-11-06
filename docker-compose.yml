@@ -17,9 +17,8 @@ services:
     volumes:
       - ./data:/var/lib/gitportal/data
       - /home:/home
-      - /opt:/opt
-      - /var/www:/var/www
-      - /tmp:/tmp
+      - /opt:/opt:ro
+      - /var/www:/var/www:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 15s

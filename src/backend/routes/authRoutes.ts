@@ -7,10 +7,32 @@ export async function registerAuthRoutes(
   authService: AuthService,
   middlewares: ReturnType<typeof buildAuthMiddlewares>
 ) {
+  // Per-IP sliding window rate limiter for authentication endpoints
+  const ipRateMap = new Map<string, { count: number; resetAt: number }>();
+  const RATE_WINDOW_MS = 60 * 1000;
+  const MAX_AUTH_REQS_PER_WINDOW = process.env.VITEST ? 500 : 20;
+
+  function checkAuthRateLimit(ip: string): boolean {
+    const now = Date.now();
+    const record = ipRateMap.get(ip);
+    if (!record || now > record.resetAt) {
+      ipRateMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+      return true;
+    }
+    if (record.count >= MAX_AUTH_REQS_PER_WINDOW) {
+      return false;
+    }
+    record.count++;
+    return true;
+  }
+
   // 1. Request OTP / Magic Link for existing invited user
   app.post('/api/auth/request-code', async (req, reply) => {
-    const { email } = req.body as { email: string };
-    if (!email) {
+    if (!checkAuthRateLimit(req.ip || 'unknown')) {
+      return reply.code(429).send({ error: 'Too many authentication requests. Please try again in a minute.' });
+    }
+    const { email } = (req.body || {}) as { email?: string };
+    if (!email || typeof email !== 'string') {
       return reply.code(400).send({ error: 'Email is required' });
     }
     await authService.requestLoginChallenge(email);
@@ -22,6 +44,9 @@ export async function registerAuthRoutes(
 
   // 2. Verify Magic Link or 6-Digit OTP and set HttpOnly Session Cookie
   app.post('/api/auth/verify', async (req, reply) => {
+    if (!checkAuthRateLimit(req.ip || 'unknown')) {
+      return reply.code(429).send({ error: 'Too many verification attempts. Please try again later.' });
+    }
     const body = (req.body || {}) as { magicToken?: string; email?: string; otpCode?: string };
 
     try {
@@ -58,11 +83,22 @@ export async function registerAuthRoutes(
   // Consuming on GET allows automated scanners to burn tokens before the user can open them.
   // Instead, redirect to the web app which will authenticate via POST /api/auth/verify.
   const verifyGetHandler = async (req: any, reply: any) => {
-    const { token } = req.query as { token?: string };
+    const { token, path: targetPath, projectId } = req.query as {
+      token?: string;
+      path?: string;
+      projectId?: string;
+    };
     if (!token) {
       return reply.redirect('/?error=missing_token');
     }
-    return reply.redirect(`/?token=${encodeURIComponent(token)}`);
+    let redirectUrl = `/?token=${encodeURIComponent(token)}`;
+    if (projectId && typeof projectId === 'string') {
+      redirectUrl += `&projectId=${encodeURIComponent(projectId)}`;
+    }
+    if (targetPath && typeof targetPath === 'string' && !targetPath.startsWith('//') && !targetPath.includes('://')) {
+      redirectUrl += `&path=${encodeURIComponent(targetPath.replace(/^\/+/, ''))}`;
+    }
+    return reply.redirect(redirectUrl);
   };
 
   app.get('/api/auth/verify', verifyGetHandler);

@@ -12,8 +12,13 @@ export function resolveRepoLink(currentFilePath: string, rawHref: string): Resol
     return { type: 'anchor-only', rawHref };
   }
 
-  // 1. External protocols (http, https, mailto, tel)
-  if (/^(https?:|mailto:|tel:)/i.test(rawHref)) {
+  // Block dangerous URI schemes (javascript:, vbscript:, data:, file:)
+  if (/^\s*(javascript|vbscript|data|file):/i.test(rawHref)) {
+    return { type: 'anchor-only', rawHref: '' };
+  }
+
+  // 1. External protocols (mailto, tel)
+  if (/^(mailto:|tel:)/i.test(rawHref)) {
     return { type: 'external', rawHref };
   }
 
@@ -22,13 +27,77 @@ export function resolveRepoLink(currentFilePath: string, rawHref: string): Resol
     return { type: 'anchor-only', hash: rawHref.slice(1), rawHref };
   }
 
-  // 3. Relative or root-relative repository path
-  const [pathPart, hashPart] = rawHref.split('#');
-  const currentDirSegments = currentFilePath.split('/').slice(0, -1);
+  // 3. Full HTTP/HTTPS URLs
+  if (/^https?:\/\//i.test(rawHref)) {
+    try {
+      const urlObj = new URL(rawHref);
+      const isPortalRaw = /\/api\/viewer\/[^/]+\/raw\/(.*)/.test(urlObj.pathname);
+      const hasPathQuery = urlObj.searchParams.has('path');
 
-  const inputSegments = pathPart.startsWith('/')
-    ? pathPart.slice(1).split('/')
-    : [...currentDirSegments, ...pathPart.split('/')];
+      // Check if this URL points to our portal's raw endpoint or viewer deep link
+      if (isPortalRaw || hasPathQuery) {
+        let extractedPath = '';
+        if (isPortalRaw) {
+          const match = urlObj.pathname.match(/\/api\/viewer\/[^/]+\/raw\/(.*)/);
+          extractedPath = match ? match[1] : '';
+        } else if (hasPathQuery) {
+          extractedPath = urlObj.searchParams.get('path') || '';
+        }
+
+        try {
+          extractedPath = decodeURIComponent(extractedPath);
+        } catch {
+          // keep as is
+        }
+
+        const hashPart = urlObj.hash ? urlObj.hash.slice(1) : undefined;
+        return {
+          type: 'internal-repo',
+          targetPath: extractedPath.replace(/^\/+/, ''),
+          hash: hashPart,
+          rawHref,
+        };
+      }
+
+      // External website
+      return { type: 'external', rawHref };
+    } catch {
+      return { type: 'external', rawHref };
+    }
+  }
+
+  // 4. Relative or root-relative repository path, or portal root raw/path links
+  const [withoutHash, hashPart] = rawHref.split('#');
+  const [pathAndQuery, queryPart] = withoutHash.split('?');
+
+  let pathCandidate = pathAndQuery;
+
+  // Check if query parameter contains ?path=...
+  if (queryPart) {
+    const searchParams = new URLSearchParams(queryPart);
+    if (searchParams.has('path')) {
+      pathCandidate = searchParams.get('path') || '';
+    }
+  }
+
+  // Check if root-relative path points to /api/viewer/:projectId/raw/...
+  const rawMatch = pathCandidate.match(/^\/?api\/viewer\/[^/]+\/raw\/(.*)/);
+  if (rawMatch) {
+    pathCandidate = rawMatch[1];
+  }
+
+  // URL-decode characters (e.g. %20 for spaces)
+  try {
+    pathCandidate = decodeURIComponent(pathCandidate);
+  } catch {
+    // keep as is
+  }
+
+  const currentDirSegments = currentFilePath ? currentFilePath.split('/').slice(0, -1) : [];
+
+  const inputSegments = pathCandidate.startsWith('/')
+    ? pathCandidate.slice(1).split('/')
+    : [...currentDirSegments, ...pathCandidate.split('/')];
 
   const resolvedStack: string[] = [];
   for (const segment of inputSegments) {
@@ -44,13 +113,37 @@ export function resolveRepoLink(currentFilePath: string, rawHref: string): Resol
 
   // If link was written relative to repository root (without leading slash), e.g. 'docs/pmo/project_phases.png'
   // inside 'docs/pmo/projectplan.md', candidateFromCurrentDir would be 'docs/pmo/docs/pmo/project_phases.png'.
-  // If candidateFromRoot is in authorizedPaths, prefer candidateFromRoot.
-  const rootCandidate = pathPart.replace(/^\/+/, '');
+  const rootCandidate = pathCandidate.replace(/^\/+/, '');
+
   try {
     const authorizedPaths = useViewerStore.getState().authorizedPaths || [];
     if (authorizedPaths.length > 0) {
-      if (!authorizedPaths.includes(targetPath) && authorizedPaths.includes(rootCandidate)) {
+      if (authorizedPaths.includes(targetPath)) {
+        // Keep targetPath
+      } else if (authorizedPaths.includes(rootCandidate)) {
         targetPath = rootCandidate;
+      } else {
+        // Extensionless or index match (e.g. .md, .html, .yaml, .yml, .mmd, /index.html)
+        const match = authorizedPaths.find(
+          (p) =>
+            p === `${targetPath}.md` ||
+            p === `${targetPath}.html` ||
+            p === `${targetPath}.yaml` ||
+            p === `${targetPath}.yml` ||
+            p === `${targetPath}.mmd` ||
+            p === `${targetPath}/index.html` ||
+            p.startsWith(`${targetPath}.`) ||
+            p === `${rootCandidate}.md` ||
+            p === `${rootCandidate}.html` ||
+            p === `${rootCandidate}.yaml` ||
+            p === `${rootCandidate}.yml` ||
+            p === `${rootCandidate}.mmd` ||
+            p === `${rootCandidate}/index.html` ||
+            p.startsWith(`${rootCandidate}.`)
+        );
+        if (match) {
+          targetPath = match;
+        }
       }
     }
   } catch {

@@ -6,7 +6,8 @@ import { AuthService } from '../auth/authService.js';
 import { buildAuthMiddlewares } from '../auth/authMiddleware.js';
 import { PortalMailer, SmtpConfig, BrevoApiConfig, parseSender } from '../auth/mailer.js';
 import { LocalRepoService } from '../services/localRepoService.js';
-import { ProjectCopierService } from '../services/projectCopier.js';
+import { ProjectCopierService, validateCopyTargetPath } from '../services/projectCopier.js';
+import { validateGitBranchName } from '../services/gitManager.js';
 import { ProjectSyncAndRagOrchestrator } from '../workers/syncWorker.js';
 import { encryptSecret } from '../utils/crypto.js';
 
@@ -32,12 +33,6 @@ export async function registerAdminRoutes(
     };
     if (!email) {
       return reply.code(400).send({ error: 'Email is required' });
-    }
-
-    // Detect public URL from request origin/host
-    const origin = req.headers.origin || (req.headers.host ? `${req.protocol}://${req.headers.host}` : null);
-    if (origin) {
-      authService.setPortalBaseUrl(origin);
     }
 
     const inviteResult = await authService.invitePublisher(req.user!.sub, email, {
@@ -84,6 +79,14 @@ export async function registerAdminRoutes(
     const user = db.prepare(`SELECT id, global_role FROM users WHERE id = ?`).get(userId) as any;
     if (!user) {
       return reply.code(404).send({ error: 'Publisher not found' });
+    }
+
+    if (status !== undefined && status !== 'ACTIVE' && status !== 'SUSPENDED') {
+      return reply.code(400).send({ error: 'Status must be ACTIVE or SUSPENDED' });
+    }
+
+    if (userId === req.user!.sub && status === 'SUSPENDED') {
+      return reply.code(400).send({ error: 'SysAdmin cannot suspend their own account' });
     }
 
     db.prepare(`
@@ -136,7 +139,16 @@ export async function registerAdminRoutes(
     const rows = db.prepare(`SELECT key, value_json FROM system_settings`).all() as any[];
     const settings: Record<string, any> = {};
     for (const r of rows) {
-      settings[r.key] = JSON.parse(r.value_json);
+      const parsed = JSON.parse(r.value_json);
+      if (r.key === 'brevo_config' || r.key === 'smtp_config') {
+        settings[r.key] = {
+          ...parsed,
+          apiKey: parsed.apiKey ? '••••••••' : '',
+          pass: parsed.pass ? '••••••••' : '',
+        };
+      } else {
+        settings[r.key] = parsed;
+      }
     }
     return reply.send({ settings });
   });
@@ -195,8 +207,9 @@ export async function registerAdminRoutes(
     }
 
     const parsed = parseSender(senderEmail || '');
-    const newConfig: BrevoApiConfig = {
-      apiKey: finalKey.trim(),
+    const encryptedApiKey = `enc:${encryptSecret(finalKey.trim())}`;
+    const storedConfig: BrevoApiConfig = {
+      apiKey: encryptedApiKey,
       senderEmail: (senderEmail && !senderEmail.includes('<') ? senderEmail : parsed.email) || current?.senderEmail || 'noreply@gitlens-portal.local',
       senderName: (senderName || parsed.name || current?.senderName || 'GitLens Portal').trim(),
     };
@@ -205,9 +218,9 @@ export async function registerAdminRoutes(
       INSERT INTO system_settings (key, value_json, updated_at)
       VALUES ('brevo_config', ?, ?)
       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at
-    `).run(JSON.stringify(newConfig), Date.now());
+    `).run(JSON.stringify(storedConfig), Date.now());
 
-    return reply.send({ ok: true, isConfigured: true, config: { ...newConfig, apiKey: '••••••••' } });
+    return reply.send({ ok: true, isConfigured: true, config: { ...storedConfig, apiKey: '••••••••' } });
   };
 
   const handleTestEmailConfig = async (req: any, reply: any) => {
@@ -305,7 +318,19 @@ export async function registerAdminRoutes(
     const projectId = randomUUID();
     const resolvedSource = path.resolve(localPath.trim());
     const trackingBranch = branch?.trim() || inspection.currentBranch || 'main';
-    const resolvedAdditional = additionalCopyPath?.trim() ? path.resolve(additionalCopyPath.trim()) : null;
+    try {
+      validateGitBranchName(trackingBranch);
+    } catch (valErr: any) {
+      return reply.code(400).send({ error: valErr.message || 'Invalid Git branch name' });
+    }
+    let resolvedAdditional: string | null = null;
+    if (additionalCopyPath?.trim()) {
+      try {
+        resolvedAdditional = validateCopyTargetPath(additionalCopyPath.trim());
+      } catch (valErr: any) {
+        return reply.code(400).send({ error: valErr.message || 'Invalid additional copy path' });
+      }
+    }
     const encGemini = geminiApiKey?.trim() ? encryptSecret(geminiApiKey.trim()) : null;
 
     db.prepare(`

@@ -5,10 +5,10 @@ import fs from 'node:fs/promises';
 import { AuthService } from '../auth/authService.js';
 import { buildAuthMiddlewares } from '../auth/authMiddleware.js';
 import { ProjectSyncAndRagOrchestrator } from '../workers/syncWorker.js';
-import { BareGitManager } from '../services/gitManager.js';
+import { BareGitManager, validateGitBranchName, validateRepositorySource } from '../services/gitManager.js';
 import { GeminiRagService } from '../services/geminiRagService.js';
-import { ProjectCopierService } from '../services/projectCopier.js';
-import { encryptSecret, verifyGithubWebhookSignature } from '../utils/crypto.js';
+import { ProjectCopierService, validateCopyTargetPath } from '../services/projectCopier.js';
+import { encryptSecret, decryptSecret, verifyGithubWebhookSignature } from '../utils/crypto.js';
 
 export async function registerPublisherRoutes(
   app: FastifyInstance,
@@ -109,6 +109,14 @@ export async function registerPublisherRoutes(
       return reply.code(400).send({ error: 'Project name and Git repository URL are required' });
     }
 
+    const effectiveBranch = branch?.trim() || 'main';
+    try {
+      validateGitBranchName(effectiveBranch);
+      validateRepositorySource(repoUrl.trim(), { allowLocal: req.user!.role === 'SYSADMIN' });
+    } catch (valErr: any) {
+      return reply.code(400).send({ error: valErr.message || 'Invalid repository URL or branch' });
+    }
+
     // Check publisher max_repos quota
     if (req.user!.role !== 'SYSADMIN') {
       const user = db.prepare(`SELECT max_repos FROM users WHERE id = ?`).get(req.user!.sub) as any;
@@ -198,6 +206,45 @@ export async function registerPublisherRoutes(
     if (!p) return reply.code(404).send({ error: 'Project not found' });
 
     const body = req.body as any;
+
+    // Validate repoUrl and branch if modified
+    if (body.repoUrl !== undefined && body.repoUrl !== null) {
+      try {
+        validateRepositorySource(String(body.repoUrl).trim(), {
+          allowLocal: req.user!.role === 'SYSADMIN' || !!p.is_local_repo,
+        });
+      } catch (valErr: any) {
+        return reply.code(400).send({ error: valErr.message || 'Invalid repository URL' });
+      }
+    }
+    if (body.branch !== undefined && body.branch !== null) {
+      try {
+        validateGitBranchName(String(body.branch).trim());
+      } catch (valErr: any) {
+        return reply.code(400).send({ error: valErr.message || 'Invalid branch name' });
+      }
+    }
+
+    // Restrict local filesystem copy configuration strictly to SYSADMIN (C-2)
+    if (
+      (body.additionalCopyPath !== undefined ||
+        body.copyMode !== undefined ||
+        body.autoCopyOnSync !== undefined) &&
+      req.user!.role !== 'SYSADMIN'
+    ) {
+      return reply.code(403).send({
+        error: 'Only SysAdmin is authorized to configure local filesystem copy locations',
+      });
+    }
+
+    if (body.additionalCopyPath) {
+      try {
+        validateCopyTargetPath(String(body.additionalCopyPath));
+      } catch (valErr: any) {
+        return reply.code(400).send({ error: valErr.message || 'Invalid copy target path' });
+      }
+    }
+
     let encPat = p.encrypted_github_pat;
     if (body.githubPat !== undefined) {
       encPat = body.githubPat ? encryptSecret(body.githubPat.trim()) : null;
@@ -267,8 +314,14 @@ export async function registerPublisherRoutes(
     });
   });
 
-  // 5b. On-demand Copy Project to Additional Location
+  // 5b. On-demand Copy Project to Additional Location (Restricted strictly to SYSADMIN)
   app.post('/api/projects/:projectId/copy-to-location', publisherGuard, async (req, reply) => {
+    if (req.user!.role !== 'SYSADMIN') {
+      return reply.code(403).send({
+        error: 'Only SysAdmin is authorized to copy repository files to local host paths',
+      });
+    }
+
     const { projectId } = req.params as { projectId: string };
     const p = getOwnedProject(projectId, req.user!.sub, req.user!.role);
     if (!p) return reply.code(404).send({ error: 'Project not found' });
@@ -281,6 +334,12 @@ export async function registerPublisherRoutes(
     const dest = body.targetPath || p.additional_copy_path;
     if (!dest) {
       return reply.code(400).send({ error: 'Target directory path is required' });
+    }
+
+    try {
+      validateCopyTargetPath(String(dest));
+    } catch (valErr: any) {
+      return reply.code(400).send({ error: valErr.message || 'Invalid target directory path' });
     }
 
     const result = await projectCopier.copyProjectToLocation(projectId, dest, {
@@ -333,15 +392,19 @@ export async function registerPublisherRoutes(
     const project = db.prepare(`SELECT * FROM projects WHERE id = ?`).get(projectId) as any;
     if (!project) return reply.code(404).send({ error: 'Project not found' });
 
-    // Validate signature if webhook secret is configured
-    if (project.encrypted_webhook_secret) {
-      const secret = (await import('../utils/crypto.js')).decryptSecret(project.encrypted_webhook_secret);
-      const signature = req.headers['x-hub-signature-256'] as string | undefined;
-      const rawBody = JSON.stringify(req.body);
-      const valid = verifyGithubWebhookSignature(rawBody, signature, secret);
-      if (!valid) {
-        return reply.code(401).send({ error: 'Invalid webhook signature' });
-      }
+    // Require webhook secret to be configured and validate HMAC-SHA256 signature (H-5)
+    if (!project.encrypted_webhook_secret) {
+      return reply.code(401).send({
+        error: 'Webhook secret is not configured for this project',
+      });
+    }
+
+    const secret = decryptSecret(project.encrypted_webhook_secret);
+    const signature = req.headers['x-hub-signature-256'] as string | undefined;
+    const rawBody = (req as any).rawBody || (typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {}));
+    const valid = verifyGithubWebhookSignature(rawBody, signature, secret);
+    if (!valid) {
+      return reply.code(401).send({ error: 'Invalid webhook signature' });
     }
 
     // Trigger sync asynchronously in background
@@ -499,11 +562,6 @@ export async function registerPublisherRoutes(
     }
 
     try {
-      const origin = req.headers.origin || (req.headers.host ? `${req.protocol}://${req.headers.host}` : null);
-      if (origin) {
-        authService.setPortalBaseUrl(origin);
-      }
-
       const inviteResult = await authService.inviteViewerToGroups({
         publisherUserId: req.user!.sub,
         projectId,

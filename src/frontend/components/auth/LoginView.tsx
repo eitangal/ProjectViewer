@@ -62,7 +62,17 @@ export const LoginView: React.FC<{
       if (!res.ok || !data.authenticated) {
         throw new Error(data.error || 'Magic link verification failed.');
       }
-      window.history.replaceState({}, '', window.location.pathname);
+      const cleanedUrl = new URL(window.location.href);
+      cleanedUrl.searchParams.delete('token');
+      cleanedUrl.searchParams.delete('code');
+      cleanedUrl.searchParams.delete('otp');
+      cleanedUrl.searchParams.delete('error');
+      const remainingSearch = cleanedUrl.searchParams.toString();
+      window.history.replaceState(
+        {},
+        '',
+        `${cleanedUrl.pathname}${remainingSearch ? `?${remainingSearch}` : ''}${cleanedUrl.hash || ''}`
+      );
       onLoginSuccess(data.user, data.redirectProjectId);
     } catch (err: any) {
       setErrorMessage(err.message || 'Magic link verification failed');

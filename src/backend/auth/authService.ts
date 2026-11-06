@@ -31,8 +31,13 @@ export class AuthService {
   ) {}
 
   public setPortalBaseUrl(url: string): void {
-    if (url && url.trim()) {
-      this.portalBaseUrl = url.trim().replace(/\/+$/, '');
+    if (!url || !url.trim()) return;
+    try {
+      const parsed = new URL(url.trim());
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
+      this.portalBaseUrl = `${parsed.protocol}//${parsed.host}`;
+    } catch {
+      // Ignore malformed URLs
     }
   }
 
@@ -72,7 +77,7 @@ export class AuthService {
     error?: string;
   }> {
     const email = targetEmail.trim().toLowerCase();
-    const existing = this.db.prepare(`SELECT id, global_role FROM users WHERE email = ?`).get(email) as any;
+    const existing = this.db.prepare(`SELECT id, global_role, status FROM users WHERE email = ?`).get(email) as any;
     let userId = existing?.id;
 
     if (!existing) {
@@ -117,11 +122,16 @@ export class AuthService {
       '48 hours'
     );
 
+    // Zero-Trust: Never expose raw magic link or OTP when email delivery succeeds,
+    // or if target is an already-active SYSADMIN
+    const canExposeFallback =
+      !challenge.emailSent && !(existing?.global_role === 'SYSADMIN' && existing?.status === 'ACTIVE');
+
     return {
       userId,
       email,
-      magicLinkUrl: challenge.magicLinkUrl,
-      otpCode: challenge.otpCode,
+      magicLinkUrl: canExposeFallback ? challenge.magicLinkUrl : '',
+      otpCode: canExposeFallback ? challenge.otpCode : '',
       emailSent: challenge.emailSent,
       error: challenge.error,
     };
@@ -162,6 +172,27 @@ export class AuthService {
       throw new Error('Unauthorized: You do not own this project.');
     }
 
+    // Validate that all provided groupIds belong to this project
+    const uniqueGroupIds = Array.from(new Set(params.groupIds.filter(Boolean)));
+    if (uniqueGroupIds.length === 0) {
+      throw new Error('At least one valid Viewer Group ID is required.');
+    }
+    const groupPlaceholders = uniqueGroupIds.map(() => '?').join(',');
+    const validGroupsRow = this.db
+      .prepare(
+        `SELECT COUNT(DISTINCT id) as count FROM viewer_groups WHERE project_id = ? AND id IN (${groupPlaceholders})`
+      )
+      .get(params.projectId, ...uniqueGroupIds) as { count: number };
+
+    if (validGroupsRow.count !== uniqueGroupIds.length) {
+      throw new Error('Invalid Viewer Group ID: one or more groups do not belong to this project.');
+    }
+
+    // Check existing user before upsert to enforce zero-trust privilege isolation
+    const existingUser = this.db
+      .prepare(`SELECT id, global_role, status FROM users WHERE email = ?`)
+      .get(email) as { id: string; global_role: GlobalRole; status: string } | undefined;
+
     // Check project viewer count against publisher limit
     if (caller?.global_role !== 'SYSADMIN') {
       const viewerCountRow = this.db
@@ -197,7 +228,7 @@ export class AuthService {
         VALUES (?, ?, ?, ?, ?)
       `);
 
-      for (const groupId of params.groupIds) {
+      for (const groupId of uniqueGroupIds) {
         insertMembership.run(
           user.id,
           params.projectId,
@@ -210,6 +241,21 @@ export class AuthService {
 
     tx();
 
+    // Prevent privilege escalation (C-1): If the invited email belongs to an existing SYSADMIN, PUBLISHER,
+    // or an already ACTIVE user, never issue or return a raw token to the inviting Publisher.
+    const isPrivilegedOrActiveUser =
+      !!existingUser && (existingUser.global_role !== 'VIEWER' || existingUser.status === 'ACTIVE');
+
+    if (isPrivilegedOrActiveUser && !this.mailer.isConfigured()) {
+      return {
+        email,
+        magicLinkUrl: '',
+        otpCode: '',
+        emailSent: false,
+        error: 'Existing active user granted project access. For security, sign-in tokens for existing accounts are never exposed.',
+      };
+    }
+
     const challenge = await this.issueChallengeAndSendEmail(
       email,
       'INVITE_VIEWER',
@@ -219,10 +265,13 @@ export class AuthService {
       '48 hours'
     );
 
+    // Zero-Trust: Only expose manual fallback link/OTP when email was NOT sent AND target is a newly invited VIEWER
+    const canExposeFallback = !challenge.emailSent && !isPrivilegedOrActiveUser;
+
     return {
       email,
-      magicLinkUrl: challenge.magicLinkUrl,
-      otpCode: challenge.otpCode,
+      magicLinkUrl: canExposeFallback ? challenge.magicLinkUrl : '',
+      otpCode: canExposeFallback ? challenge.otpCode : '',
       emailSent: challenge.emailSent,
       error: challenge.error,
     };
@@ -269,6 +318,21 @@ export class AuthService {
 
     // Silent return if email is not registered/invited (prevents user enumeration)
     if (!user || user.status === 'SUSPENDED') return;
+
+    const now = Date.now();
+    // Rate limit & brute-force lockout protection:
+    // If user has an unexpired challenge that already hit MAX_OTP_ATTEMPTS, or >= 5 active LOGIN challenges, do not issue more
+    const activeStats = this.db
+      .prepare(`
+        SELECT COUNT(*) as activeCount, COALESCE(MAX(attempts), 0) as maxAttempts
+        FROM auth_challenges
+        WHERE email = ? AND purpose = 'LOGIN' AND expires_at > ? AND consumed_at IS NULL
+      `)
+      .get(email, now) as { activeCount: number; maxAttempts: number };
+
+    if (activeStats.maxAttempts >= this.MAX_OTP_ATTEMPTS || activeStats.activeCount >= 5) {
+      return;
+    }
 
     return await this.issueChallengeAndSendEmail(
       email,

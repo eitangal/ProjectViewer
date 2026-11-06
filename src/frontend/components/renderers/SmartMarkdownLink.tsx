@@ -29,15 +29,22 @@ export const SmartMarkdownLink: React.FC<React.AnchorHTMLAttributes<HTMLAnchorEl
     }
 
     if (resolved.type === 'internal-repo' && resolved.targetPath) {
+      if (resolved.targetPath === current && resolved.hash) {
+        const el = document.getElementById(resolved.hash);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+        }
+      }
       navigateToFile(resolved.targetPath, resolved.hash);
     }
   };
 
+  const isUnsafeScheme = /^\s*(javascript|vbscript|data|file):/i.test(href);
   const isExternal = /^(https?:|mailto:|tel:)/i.test(href);
 
   return (
     <a
-      href={href}
+      href={isUnsafeScheme ? '#' : href}
       onClick={handleClick}
       target={isExternal ? '_blank' : undefined}
       rel={isExternal ? 'noopener noreferrer' : undefined}

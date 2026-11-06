@@ -52,6 +52,7 @@ interface ViewerState {
   setPreviewGroupId: (groupId: string | null) => void;
   setAuthorizedPaths: (paths: string[]) => void;
   navigateToFile: (targetPath: string, hash?: string | null) => boolean;
+  resetSessionState: () => void;
 }
 
 export const useViewerStore = create<ViewerState>()(
@@ -92,6 +93,15 @@ export const useViewerStore = create<ViewerState>()(
       setProjectId: (projectId) => set({ projectId }),
       setPreviewGroupId: (previewGroupId) => set({ previewGroupId }),
       setAuthorizedPaths: (paths) => set({ authorizedPaths: paths }),
+      resetSessionState: () =>
+        set({
+          projectId: '',
+          activeFilePath: null,
+          activeHash: null,
+          previewGroupId: null,
+          authorizedPaths: [],
+          isAiDrawerOpen: false,
+        }),
 
       navigateToFile: (targetPath, hash = null) => {
         const normalized = targetPath.replace(/^\/+/, '');
@@ -99,14 +109,16 @@ export const useViewerStore = create<ViewerState>()(
 
         // Client-side ACL gate check before switching view
         if (authorizedPaths.length > 0 && !authorizedPaths.includes(normalized)) {
-          window.dispatchEvent(
-            new CustomEvent('portal:toast', {
-              detail: {
-                type: 'warning',
-                message: `Access restricted: "${normalized}" is outside your viewer group scope.`,
-              },
-            })
-          );
+          if (typeof window !== 'undefined' && typeof CustomEvent !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('portal:toast', {
+                detail: {
+                  type: 'warning',
+                  message: `Access restricted: "${normalized}" is outside your viewer group scope.`,
+                },
+              })
+            );
+          }
           return false;
         }
 

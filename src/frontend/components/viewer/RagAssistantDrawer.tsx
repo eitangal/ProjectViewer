@@ -1,6 +1,15 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+
+const chatSanitizeSchema = {
+  ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href || []), 'cite'],
+  },
+};
 import {
   Sparkles,
   Send,
@@ -432,6 +441,7 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
                     <div className="chat-markdown prose-indigo">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
+                        rehypePlugins={[[rehypeSanitize, chatSanitizeSchema]]}
                         components={{
                           a({ href, children }) {
                             if (href && href.startsWith('cite:')) {
@@ -449,11 +459,12 @@ export const RagAssistantDrawer: React.FC<{ projectId: string }> = ({ projectId 
                                 </button>
                               );
                             }
+                            const isSafeExternal = /^(https?:|mailto:)/i.test(href || '');
                             return (
                               <a
-                                href={href}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                                href={isSafeExternal ? href : '#'}
+                                target={isSafeExternal ? '_blank' : undefined}
+                                rel={isSafeExternal ? 'noopener noreferrer' : undefined}
                                 className="text-indigo-400 underline hover:text-indigo-300"
                               >
                                 {children}

@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
+import { decryptSecret } from '../utils/crypto.js';
 
 export interface SendAuthEmailParams {
   to: string;
@@ -87,6 +88,14 @@ export class PortalMailer implements MailDispatcher {
     this.db = db;
   }
 
+  private resolveStoredApiKey(rawKey: string): string {
+    const trimmed = rawKey.trim();
+    if (trimmed.startsWith('enc:')) {
+      return decryptSecret(trimmed.slice(4));
+    }
+    return trimmed;
+  }
+
   public getBrevoConfig(): BrevoApiConfig | null {
     if (this.db) {
       try {
@@ -98,7 +107,7 @@ export class PortalMailer implements MailDispatcher {
           const cfg = JSON.parse(row.value_json) as BrevoApiConfig;
           if (cfg.apiKey && cfg.apiKey.trim()) {
             return {
-              apiKey: cfg.apiKey.trim(),
+              apiKey: this.resolveStoredApiKey(cfg.apiKey),
               senderEmail: (cfg.senderEmail || '').trim(),
               senderName: (cfg.senderName || 'GitLens Portal').trim(),
             };
@@ -119,7 +128,7 @@ export class PortalMailer implements MailDispatcher {
           if (keyCandidate && keyCandidate.trim()) {
             const parsed = parseSender(smtpCfg.from || '');
             return {
-              apiKey: keyCandidate.trim(),
+              apiKey: this.resolveStoredApiKey(keyCandidate),
               senderEmail: smtpCfg.senderEmail || parsed.email || '',
               senderName: smtpCfg.senderName || parsed.name || 'GitLens Portal',
             };
@@ -173,7 +182,14 @@ export class PortalMailer implements MailDispatcher {
 
   public async sendAuthEmail(params: SendAuthEmailParams): Promise<{ sent: boolean; error?: string }> {
     const normalizedEmail = params.to.trim().toLowerCase();
-    this.sentMails.set(normalizedEmail, params);
+    // Bounded retention of sent emails (for test inspection / dev fallback without unbounded memory growth)
+    if (process.env.NODE_ENV !== 'production' || process.env.VITEST) {
+      if (this.sentMails.size >= 100) {
+        const oldestKey = this.sentMails.keys().next().value;
+        if (oldestKey) this.sentMails.delete(oldestKey);
+      }
+      this.sentMails.set(normalizedEmail, params);
+    }
 
     const expiryLabel = params.expiryLabel || '15 minutes';
 

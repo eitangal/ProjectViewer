@@ -1,11 +1,14 @@
-import React, { useRef, useState, useMemo } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { ExternalLink, Maximize2, Minimize2, RotateCcw, Sparkles, Volume2 } from 'lucide-react';
+import { useViewerStore } from '../../store/useViewerStore.js';
+import { resolveRepoLink } from '../../utils/resolveRepoLink.js';
 
 export const SandboxedHtmlRenderer: React.FC<{
   htmlContent: string;
   filePath?: string | null;
   projectId?: string;
-}> = ({ htmlContent, filePath, projectId }) => {
+  activeHash?: string | null;
+}> = ({ htmlContent, filePath, projectId, activeHash }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
@@ -34,19 +37,150 @@ export const SandboxedHtmlRenderer: React.FC<{
     }
   };
 
-  // Inject <base> tag so relative assets and styles resolve to the raw endpoint
+  // Listen for navigation messages sent from the sandboxed iframe
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (
+        event.data &&
+        typeof event.data === 'object' &&
+        event.data.type === 'PROJECT_VIEWER_NAVIGATE'
+      ) {
+        const { href, resolvedHref } = event.data;
+        const linkToResolve = href || resolvedHref;
+        if (!linkToResolve) return;
+
+        const current = filePath || '';
+        const resolved = resolveRepoLink(current, linkToResolve);
+
+        if (resolved.type === 'external') {
+          window.open(resolved.rawHref, '_blank', 'noopener,noreferrer');
+        } else if (resolved.type === 'internal-repo' && resolved.targetPath) {
+          useViewerStore.getState().navigateToFile(resolved.targetPath, resolved.hash);
+        } else if (resolved.type === 'anchor-only' && resolved.hash) {
+          iframeRef.current?.contentWindow?.postMessage(
+            { type: 'SCROLL_TO_ANCHOR', hash: resolved.hash },
+            '*'
+          );
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [filePath]);
+
+  // When activeHash updates, notify the iframe to scroll
+  useEffect(() => {
+    if (activeHash && iframeRef.current?.contentWindow) {
+      iframeRef.current.contentWindow.postMessage(
+        { type: 'SCROLL_TO_ANCHOR', hash: activeHash },
+        '*'
+      );
+    }
+  }, [activeHash]);
+
+  // Inject <base> tag and capture-phase link interception script into iframe HTML
   const processedHtml = useMemo(() => {
     if (!filePath || !projectId) return htmlContent;
     const dir = filePath.includes('/') ? filePath.substring(0, filePath.lastIndexOf('/')) : '';
-    const baseHref = `/api/viewer/${projectId}/raw/${dir ? encodeURI(dir) + '/' : ''}`;
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const rawBaseHref = `${origin}/api/viewer/${encodeURIComponent(projectId)}/raw/${dir ? encodeURI(dir) + '/' : ''}`;
+    const safeBaseHref = rawBaseHref.replace(/["<>]/g, (ch) => encodeURIComponent(ch));
 
-    if (!htmlContent.includes('<base ') && htmlContent.includes('<head>')) {
-      return htmlContent.replace('<head>', `<head><base href="${baseHref}">`);
-    } else if (!htmlContent.includes('<base ') && htmlContent.includes('<head ')) {
-      return htmlContent.replace(/<head[^>]*>/, `$&<base href="${baseHref}">`);
+    const baseTag = `<base href="${safeBaseHref}">`;
+    const safeHashJson = JSON.stringify(activeHash || '');
+
+    const interceptorScript = `
+<script id="gitportal-viewer-interceptor">
+(function() {
+  function handleLinkClick(e) {
+    var a = e.target;
+    while (a && a.tagName !== 'A') {
+      a = a.parentElement;
     }
-    return htmlContent;
-  }, [htmlContent, filePath, projectId]);
+    if (!a) return;
+
+    var rawHref = a.getAttribute('href') || a.getAttribute('xlink:href');
+    if (!rawHref) return;
+
+    // Ignore dangerous URI schemes
+    if (/^\\s*(javascript|vbscript|data|file):/i.test(rawHref)) {
+      e.preventDefault();
+      return;
+    }
+
+    // In-page hash anchors on the current HTML document
+    if (rawHref.startsWith('#')) {
+      return;
+    }
+
+    // External protocol handlers
+    if (/^(mailto:|tel:)/i.test(rawHref)) {
+      return;
+    }
+
+    // Intercept internal file navigation and dispatch to parent ProjectViewer
+    e.preventDefault();
+    e.stopPropagation();
+
+    try {
+      window.parent.postMessage({
+        type: 'PROJECT_VIEWER_NAVIGATE',
+        href: rawHref,
+        resolvedHref: a.href || rawHref
+      }, '*');
+    } catch (err) {}
+  }
+
+  document.addEventListener('click', handleLinkClick, true);
+
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'SCROLL_TO_ANCHOR' && e.data.hash) {
+      var el = document.getElementById(e.data.hash);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  });
+
+  var initialHash = ${safeHashJson};
+  if (initialHash) {
+    var scrollToTarget = function() {
+      var el = document.getElementById(initialHash);
+      if (el) el.scrollIntoView();
+    };
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', scrollToTarget);
+    } else {
+      setTimeout(scrollToTarget, 60);
+    }
+  }
+})();
+</script>
+`;
+
+    let html = htmlContent;
+
+    if (!html.includes('<base ')) {
+      if (html.includes('<head>')) {
+        html = html.replace('<head>', `<head>${baseTag}`);
+      } else if (html.includes('<head ')) {
+        html = html.replace(/<head[^>]*>/, `$&${baseTag}`);
+      } else {
+        html = `${baseTag}\n${html}`;
+      }
+    }
+
+    if (html.includes('</head>')) {
+      html = html.replace('</head>', `${interceptorScript}</head>`);
+    } else if (html.includes('</body>')) {
+      html = html.replace('</body>', `${interceptorScript}</body>`);
+    } else {
+      html = `${html}\n${interceptorScript}`;
+    }
+
+    return html;
+  }, [htmlContent, filePath, projectId, activeHash]);
 
   return (
     <div dir="ltr" className="h-full w-full flex flex-col bg-slate-950 overflow-hidden select-none">
@@ -93,15 +227,14 @@ export const SandboxedHtmlRenderer: React.FC<{
         </div>
       </div>
 
-      {/* Full-Bleed Interactive Sandbox Iframe */}
+      {/* Full-Bleed Interactive Sandbox Iframe (Opaque Origin: no allow-same-origin) */}
       <iframe
         key={iframeKey}
         ref={iframeRef}
         title="Interactive HTML Application Viewport"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
-        allow="autoplay; fullscreen; encrypted-media; camera; microphone"
-        src={rawUrl || undefined}
-        srcDoc={!rawUrl ? processedHtml : undefined}
+        sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads"
+        allow="autoplay; fullscreen; encrypted-media"
+        srcDoc={processedHtml}
         className="w-full flex-1 border-0 h-full bg-slate-950"
       />
     </div>

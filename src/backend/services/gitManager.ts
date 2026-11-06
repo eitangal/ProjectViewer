@@ -2,9 +2,101 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { FileDelta, RepoFileEntry, RepoFileEntryWithSha } from '@/shared/types.js';
 
 const execFileAsync = promisify(execFile);
+
+const FORBIDDEN_SYSTEM_PREFIXES = ['/etc', '/proc', '/sys', '/dev', '/boot', '/root', '/var/run'];
+
+export function validateGitBranchName(branch: string): void {
+  const trimmed = (branch || '').trim();
+  if (
+    !trimmed ||
+    trimmed.startsWith('-') ||
+    trimmed.startsWith('/') ||
+    trimmed.endsWith('/') ||
+    trimmed.endsWith('.lock') ||
+    trimmed.includes('..') ||
+    trimmed.includes('@{') ||
+    !/^[a-zA-Z0-9._/-]+$/.test(trimmed)
+  ) {
+    throw new Error('Invalid Git branch or reference name');
+  }
+}
+
+export function validateCommitSha(commitSha: string): void {
+  const trimmed = (commitSha || '').trim();
+  if (!trimmed || trimmed.startsWith('-') || (!/^[0-9a-fA-F]{4,64}$/.test(trimmed) && trimmed !== 'HEAD')) {
+    throw new Error('Invalid Git commit SHA');
+  }
+}
+
+export function validateRepositorySource(
+  rawUrl: string,
+  options?: { allowLocal?: boolean }
+): void {
+  const trimmed = (rawUrl || '').trim();
+  if (!trimmed || trimmed.startsWith('-')) {
+    throw new Error('Invalid repository URL');
+  }
+
+  // Block git remote helper syntax (e.g. ext::, fd::, etc.) and file:// scheme
+  if (/^[a-zA-Z0-9+.-]+::/.test(trimmed) || /^file:\/\//i.test(trimmed)) {
+    throw new Error('Unsupported or unsafe Git transport protocol');
+  }
+
+  // Handle local filesystem paths
+  if (trimmed.startsWith('/')) {
+    const resolved = path.resolve(trimmed);
+    const isForbiddenSystemDir = FORBIDDEN_SYSTEM_PREFIXES.some(
+      (prefix) => resolved === prefix || resolved.startsWith(`${prefix}/`)
+    );
+    if (isForbiddenSystemDir) {
+      throw new Error('Access to restricted system directory is forbidden');
+    }
+
+    const isVitestTempRepo =
+      Boolean(process.env.VITEST) &&
+      resolved.startsWith(path.join(os.tmpdir(), 'gitlens-'));
+
+    if (!options?.allowLocal && !isVitestTempRepo) {
+      throw new Error('Local filesystem repository paths are restricted to SysAdmin');
+    }
+    return;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error('Invalid repository URL: must be a valid HTTPS URL');
+  }
+
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Only HTTPS Git repository URLs are permitted');
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new Error('Repository URL must not contain embedded credentials; use GitHub PAT instead');
+  }
+
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (
+    host === 'localhost' ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+  ) {
+    throw new Error('Internal, loopback, or private network repository URLs are not permitted');
+  }
+}
 
 export class BareGitManager {
   private fileCache: Map<string, RepoFileEntry[]> = new Map();
@@ -39,9 +131,14 @@ export class BareGitManager {
     githubPat?: string,
     isLocal: boolean = false
   ): Promise<string> {
+    validateGitBranchName(branch);
+    validateRepositorySource(repoUrl, { allowLocal: isLocal });
+
     const repoDir = this.getRepoDir(projectId);
-    const isLocalPath = isLocal || repoUrl.startsWith('/') || repoUrl.startsWith('file://');
-    const authArgs = isLocalPath ? ['-c', 'safe.directory=*'] : this.buildAuthHeader(githubPat);
+    const isLocalPath = isLocal || repoUrl.trim().startsWith('/');
+    const authArgs = isLocalPath
+      ? ['-c', 'safe.directory=*', '-c', 'protocol.file.allow=always']
+      : [...this.buildAuthHeader(githubPat), '-c', 'protocol.allow=https'];
 
     const exists = await fs
       .stat(repoDir)
@@ -52,19 +149,17 @@ export class BareGitManager {
       await fs.mkdir(path.dirname(repoDir), { recursive: true });
       const cloneArgs = isLocalPath
         ? [
-            '-c',
-            'safe.directory=*',
+            ...authArgs,
             'clone',
             '--bare',
             '--single-branch',
             '--branch',
             branch,
+            '--',
             repoUrl,
             repoDir,
           ]
         : [
-            '-c',
-            'safe.directory=*',
             ...authArgs,
             'clone',
             '--bare',
@@ -73,6 +168,7 @@ export class BareGitManager {
             '--single-branch',
             '--branch',
             branch,
+            '--',
             repoUrl,
             repoDir,
           ];
@@ -81,16 +177,13 @@ export class BareGitManager {
     } else {
       const fetchArgs = isLocalPath
         ? [
-            '-c',
-            'safe.directory=*',
+            ...authArgs,
             'fetch',
             'origin',
             `${branch}:${branch}`,
             '--prune',
           ]
         : [
-            '-c',
-            'safe.directory=*',
             ...authArgs,
             'fetch',
             'origin',
@@ -103,7 +196,7 @@ export class BareGitManager {
       await execFileAsync('git', fetchArgs, { cwd: repoDir });
     }
 
-    const { stdout } = await execFileAsync('git', ['-c', 'safe.directory=*', 'rev-parse', branch], { cwd: repoDir });
+    const { stdout } = await execFileAsync('git', ['-c', 'safe.directory=*', 'rev-parse', '--verify', `${branch}^{commit}`], { cwd: repoDir });
     return stdout.trim();
   }
 
@@ -127,6 +220,7 @@ export class BareGitManager {
    * Explicitly sets core.quotePath=false so UTF-8 / Hebrew paths are unescaped and unquoted.
    */
   public async listRepoFiles(projectId: string, commitSha: string): Promise<RepoFileEntry[]> {
+    validateCommitSha(commitSha);
     const cacheKey = `${projectId}:${commitSha}`;
     if (this.fileCache.has(cacheKey)) {
       return this.fileCache.get(cacheKey)!;
@@ -168,6 +262,7 @@ export class BareGitManager {
    * Used for deterministic snapshot comparisons and incremental RAG delta processing.
    */
   public async listRepoFilesWithShas(projectId: string, commitSha: string): Promise<RepoFileEntryWithSha[]> {
+    validateCommitSha(commitSha);
     const repoDir = this.getRepoDir(projectId);
     const { stdout } = await execFileAsync(
       'git',
@@ -255,6 +350,10 @@ export class BareGitManager {
     commitSha: string,
     filePath: string
   ): Promise<string> {
+    validateCommitSha(commitSha);
+    if (!filePath || filePath.startsWith('-') || filePath.includes('\0')) {
+      throw new Error('Invalid repository file path');
+    }
     const repoDir = this.getRepoDir(projectId);
     const { stdout } = await execFileAsync(
       'git',
@@ -273,6 +372,10 @@ export class BareGitManager {
     commitSha: string,
     filePath: string
   ): Promise<Buffer> {
+    validateCommitSha(commitSha);
+    if (!filePath || filePath.startsWith('-') || filePath.includes('\0')) {
+      throw new Error('Invalid repository file path');
+    }
     const repoDir = this.getRepoDir(projectId);
     const { stdout } = await execFileAsync(
       'git',

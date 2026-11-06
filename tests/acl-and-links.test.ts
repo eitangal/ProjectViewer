@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   CompiledGroupMatcher,
   resolveAuthorizedFiles,
@@ -6,6 +6,7 @@ import {
 } from '../src/backend/services/aclMatcher.js';
 import { resolveRepoLink } from '../src/frontend/utils/resolveRepoLink.js';
 import { detectDocumentFormat } from '../src/frontend/utils/detectDocumentFormat.js';
+import { useViewerStore } from '../src/frontend/store/useViewerStore.js';
 import { GroupAclRule, RepoFileEntry } from '../src/shared/types.js';
 
 describe('1. Compiled ACL Matcher Engine (aclMatcher.ts)', () => {
@@ -123,6 +124,82 @@ describe('2. Link Interception & Resolution (resolveRepoLink.ts)', () => {
     expect(res.type).toBe('internal-repo');
     expect(res.targetPath).toBe('docs/security/audit.md');
   });
+
+  it('strips query parameters while preserving anchors', () => {
+    const res = resolveRepoLink('docs/intro.md', 'subpage.html?v=1&theme=dark#auth-flow');
+    expect(res.type).toBe('internal-repo');
+    expect(res.targetPath).toBe('docs/subpage.html');
+    expect(res.hash).toBe('auth-flow');
+  });
+
+  it('decodes URL-encoded paths (e.g. %20 for spaces)', () => {
+    const res = resolveRepoLink('index.html', 'docs/user%20guide.md');
+    expect(res.type).toBe('internal-repo');
+    expect(res.targetPath).toBe('docs/user guide.md');
+  });
+
+  it('extracts repo paths from /api/viewer/:projectId/raw/ links', () => {
+    const res = resolveRepoLink('README.md', '/api/viewer/proj-abc/raw/specs/openapi.yaml');
+    expect(res.type).toBe('internal-repo');
+    expect(res.targetPath).toBe('specs/openapi.yaml');
+  });
+
+  it('extracts repo paths from full same-origin raw endpoint URLs with hash', () => {
+    const res = resolveRepoLink(
+      'README.md',
+      'http://localhost:5173/api/viewer/proj-abc/raw/specs/openapi.yaml#servers'
+    );
+    expect(res.type).toBe('internal-repo');
+    expect(res.targetPath).toBe('specs/openapi.yaml');
+    expect(res.hash).toBe('servers');
+  });
+
+  it('extracts repo paths from portal deep link queries (?path=...)', () => {
+    const res1 = resolveRepoLink('index.html', '/?path=docs/arch/overview.md#system');
+    expect(res1.type).toBe('internal-repo');
+    expect(res1.targetPath).toBe('docs/arch/overview.md');
+    expect(res1.hash).toBe('system');
+
+    const res2 = resolveRepoLink('index.html', '?path=specs/openapi.yaml');
+    expect(res2.type).toBe('internal-repo');
+    expect(res2.targetPath).toBe('specs/openapi.yaml');
+  });
+
+  it('resolves links within HTML documents to other repository files', () => {
+    // Relative link from root index.html to documentation HTML
+    const res1 = resolveRepoLink('index.html', 'docs/overview.html');
+    expect(res1.type).toBe('internal-repo');
+    expect(res1.targetPath).toBe('docs/overview.html');
+
+    // Climbing link from nested HTML file to root README.md
+    const res2 = resolveRepoLink('docs/sub/page.html', '../../README.md');
+    expect(res2.type).toBe('internal-repo');
+    expect(res2.targetPath).toBe('README.md');
+
+    // Link from HTML file to Markdown specification
+    const res3 = resolveRepoLink('reports/summary.html', '../docs/arch/overview.md#arch');
+    expect(res3.type).toBe('internal-repo');
+    expect(res3.targetPath).toBe('docs/arch/overview.md');
+    expect(res3.hash).toBe('arch');
+  });
+
+  it('infers missing file extensions against authorizedPaths (e.g. extensionless doc links)', () => {
+    useViewerStore.setState({
+      authorizedPaths: ['specs/openapi.yaml', 'docs/guide.md', 'apps/demo.html'],
+    });
+
+    const res1 = resolveRepoLink('README.md', 'specs/openapi');
+    expect(res1.type).toBe('internal-repo');
+    expect(res1.targetPath).toBe('specs/openapi.yaml');
+
+    const res2 = resolveRepoLink('README.md', 'docs/guide');
+    expect(res2.type).toBe('internal-repo');
+    expect(res2.targetPath).toBe('docs/guide.md');
+
+    const res3 = resolveRepoLink('README.md', 'apps/demo');
+    expect(res3.type).toBe('internal-repo');
+    expect(res3.targetPath).toBe('apps/demo.html');
+  });
 });
 
 describe('3. Multi-Format Detection (detectDocumentFormat.ts)', () => {
@@ -164,5 +241,86 @@ server:
   host: 0.0.0.0
 `;
     expect(detectDocumentFormat('config/server.yaml', standardYaml)).toBe('code');
+  });
+});
+
+describe('4. In-Scope Navigation & ACL Gate Enforcement (navigateToFile)', () => {
+  beforeEach(() => {
+    useViewerStore.setState({
+      activeFilePath: 'README.md',
+      activeHash: null,
+      authorizedPaths: [
+        'README.md',
+        'docs/arch/overview.md',
+        'reports/coverage.html',
+        'specs/openapi.yaml',
+        'assets/logo.png',
+      ],
+    });
+  });
+
+  it('navigates successfully to authorized HTML and Markdown files within viewer scope', () => {
+    const { navigateToFile } = useViewerStore.getState();
+
+    // Navigate to authorized Markdown file
+    const navMd = navigateToFile('docs/arch/overview.md', 'arch-summary');
+    expect(navMd).toBe(true);
+    expect(useViewerStore.getState().activeFilePath).toBe('docs/arch/overview.md');
+    expect(useViewerStore.getState().activeHash).toBe('arch-summary');
+
+    // Navigate to authorized HTML file
+    const navHtml = navigateToFile('reports/coverage.html');
+    expect(navHtml).toBe(true);
+    expect(useViewerStore.getState().activeFilePath).toBe('reports/coverage.html');
+    expect(useViewerStore.getState().activeHash).toBeNull();
+  });
+
+  it('blocks navigation to files outside viewer scope and emits restricted toast event', () => {
+    const { navigateToFile } = useViewerStore.getState();
+
+    const target = new EventTarget();
+    const originalWindow = (globalThis as any).window;
+    const originalCustomEvent = (globalThis as any).CustomEvent;
+
+    class MockCustomEvent extends Event {
+      detail: any;
+      constructor(type: string, dict?: any) {
+        super(type);
+        this.detail = dict?.detail;
+      }
+    }
+
+    (globalThis as any).CustomEvent = MockCustomEvent;
+    (globalThis as any).window = {
+      dispatchEvent: (e: Event) => target.dispatchEvent(e),
+      addEventListener: (type: string, listener: any) => target.addEventListener(type, listener),
+      removeEventListener: (type: string, listener: any) => target.removeEventListener(type, listener),
+      location: { href: 'http://localhost:5173' },
+      history: { pushState: () => {} },
+    };
+
+    let toastReceived: any = null;
+    const toastListener = (e: Event) => {
+      toastReceived = (e as any).detail;
+    };
+    (globalThis as any).window.addEventListener('portal:toast', toastListener);
+
+    try {
+      // Attempt to navigate to an unauthorized secret file
+      const allowed = navigateToFile('docs/internal/roadmap-secret.md');
+
+      expect(allowed).toBe(false);
+      // Active file path should NOT change
+      expect(useViewerStore.getState().activeFilePath).toBe('README.md');
+      // Warning toast must be emitted with explanation
+      expect(toastReceived).toBeDefined();
+      expect(toastReceived.type).toBe('warning');
+      expect(toastReceived.message).toContain('Access restricted');
+      expect(toastReceived.message).toContain('docs/internal/roadmap-secret.md');
+    } finally {
+      (globalThis as any).window.removeEventListener('portal:toast', toastListener);
+      (globalThis as any).window = originalWindow;
+      (globalThis as any).CustomEvent = originalCustomEvent;
+    }
   });
 });

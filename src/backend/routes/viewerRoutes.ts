@@ -165,6 +165,11 @@ export async function registerViewerRoutes(
 
       const mimeType = getMimeType(normalizedPath);
       reply.header('Content-Type', mimeType);
+      reply.header('X-Content-Type-Options', 'nosniff');
+      reply.header(
+        'Content-Security-Policy',
+        "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads; default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https: http:; img-src * data: blob:; media-src * data: blob:; style-src * 'unsafe-inline'; font-src * data:;"
+      );
       return reply.send(buffer);
     } catch (err: any) {
       return reply.code(404).send({ error: 'File not found in repository commit' });
@@ -229,7 +234,7 @@ export async function registerViewerRoutes(
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
+      'X-Content-Type-Options': 'nosniff',
     });
 
     if (chunks.length === 0) {
