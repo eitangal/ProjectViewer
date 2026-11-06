@@ -1,12 +1,18 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { encryptSecret, decryptSecret, verifyGithubWebhookSignature } from '../src/backend/utils/crypto.js';
+import {
+  encryptSecret,
+  decryptSecret,
+  verifyGithubWebhookSignature,
+  validateMasterKeyConfig,
+} from '../src/backend/utils/crypto.js';
 import {
   generateVerificationChallenge,
   sha256Hex,
   safeCompareHex,
   signSessionJwt,
   verifySessionJwt,
+  validateJwtConfig,
 } from '../src/backend/auth/tokenService.js';
 import { AuthService } from '../src/backend/auth/authService.js';
 import { PortalMailer } from '../src/backend/auth/mailer.js';
@@ -46,6 +52,30 @@ describe('1. Key Encryption & Security Utility (crypto.ts)', () => {
     expect(verifyGithubWebhookSignature(payload, 'sha256=invalidhash', secret)).toBe(false);
     expect(verifyGithubWebhookSignature(payload, undefined, secret)).toBe(false);
   });
+
+  it('enforces unique 64-character MASTER_ENCRYPTION_KEY in production', () => {
+    const origEnv = process.env.NODE_ENV;
+    const origVitest = process.env.VITEST;
+    const origKey = process.env.MASTER_ENCRYPTION_KEY;
+
+    try {
+      process.env.NODE_ENV = 'production';
+      delete process.env.VITEST;
+
+      process.env.MASTER_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+      expect(() => validateMasterKeyConfig()).toThrow(/CRITICAL SECURITY ERROR: MASTER_ENCRYPTION_KEY/);
+
+      process.env.MASTER_ENCRYPTION_KEY = 'too-short';
+      expect(() => validateMasterKeyConfig()).toThrow(/64-character/);
+
+      process.env.MASTER_ENCRYPTION_KEY = 'a'.repeat(64);
+      expect(() => validateMasterKeyConfig()).not.toThrow();
+    } finally {
+      process.env.NODE_ENV = origEnv;
+      process.env.VITEST = origVitest;
+      process.env.MASTER_ENCRYPTION_KEY = origKey;
+    }
+  });
 });
 
 describe('2. Dual-Mode Token & JWT Service (tokenService.ts)', () => {
@@ -74,6 +104,30 @@ describe('2. Dual-Mode Token & JWT Service (tokenService.ts)', () => {
     expect(verified.sub).toBe('user-123');
     expect(verified.email).toBe('viewer@client.com');
     expect(verified.role).toBe('VIEWER');
+  });
+
+  it('enforces unique >=32 character JWT_SECRET_KEY in production', () => {
+    const origEnv = process.env.NODE_ENV;
+    const origVitest = process.env.VITEST;
+    const origSecret = process.env.JWT_SECRET_KEY;
+
+    try {
+      process.env.NODE_ENV = 'production';
+      delete process.env.VITEST;
+
+      process.env.JWT_SECRET_KEY = 'gitlens-portal-super-secret-jwt-signing-key-32-bytes!';
+      expect(() => validateJwtConfig()).toThrow(/CRITICAL SECURITY ERROR: JWT_SECRET_KEY/);
+
+      process.env.JWT_SECRET_KEY = 'short-key';
+      expect(() => validateJwtConfig()).toThrow(/CRITICAL SECURITY ERROR: JWT_SECRET_KEY/);
+
+      process.env.JWT_SECRET_KEY = 'a-very-secure-custom-production-secret-of-32-chars';
+      expect(() => validateJwtConfig()).not.toThrow();
+    } finally {
+      process.env.NODE_ENV = origEnv;
+      process.env.VITEST = origVitest;
+      process.env.JWT_SECRET_KEY = origSecret;
+    }
   });
 });
 

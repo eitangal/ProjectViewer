@@ -445,8 +445,29 @@ export class AuthService {
       throw new Error('Missing verification credentials.');
     }
 
+    // Fetch user and check suspension before consuming challenge
+    const user = this.db
+      .prepare(`SELECT id, email, global_role, status FROM users WHERE email = ?`)
+      .get(challenge.email) as {
+      id: string;
+      email: string;
+      global_role: GlobalRole;
+      status: string;
+    } | undefined;
+
+    if (!user || user.status === 'SUSPENDED') {
+      throw new Error('Account is suspended.');
+    }
+
+    // Sign session JWT prior to consumption to ensure that signing failures do not burn one-time tokens
+    const jwt = await signSessionJwt({
+      sub: user.id,
+      email: user.email,
+      role: user.global_role,
+    });
+
     // Atomically consume challenge, retire any other pending challenges for this email, and mark user as ACTIVE
-    const user = this.db.transaction(() => {
+    this.db.transaction(() => {
       if (isMagicToken) {
         this.db
           .prepare(`UPDATE auth_challenges SET token_consumed_at = ?, consumed_at = ? WHERE id = ?`)
@@ -485,26 +506,7 @@ export class AuthService {
           WHERE email = ?
         `)
         .run(now, challenge.email);
-
-      return this.db
-        .prepare(`SELECT id, email, global_role, status FROM users WHERE email = ?`)
-        .get(challenge.email) as {
-        id: string;
-        email: string;
-        global_role: GlobalRole;
-        status: string;
-      };
     })();
-
-    if (!user || user.status === 'SUSPENDED') {
-      throw new Error('Account is suspended.');
-    }
-
-    const jwt = await signSessionJwt({
-      sub: user.id,
-      email: user.email,
-      role: user.global_role,
-    });
 
     return {
       jwt,

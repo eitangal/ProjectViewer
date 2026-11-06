@@ -16,6 +16,18 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+if grep -q "JWT_SECRET_KEY=gitlens-portal-super-secret-jwt-signing-key-32-bytes!" .env; then
+  echo "[-] ERROR: JWT_SECRET_KEY in .env is still set to the default placeholder!"
+  echo "    Please generate a unique secret of at least 32 characters."
+  exit 1
+fi
+
+if grep -q "MASTER_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" .env; then
+  echo "[-] ERROR: MASTER_ENCRYPTION_KEY in .env is still set to the default placeholder!"
+  echo "    Please set a unique 64-character hex string."
+  exit 1
+fi
+
 mkdir -p data/repos data/backups
 
 # Check if port 80 is occupied by something outside docker

@@ -5,7 +5,7 @@ import { GlobalRole } from '@/shared/types.js';
 const DEFAULT_JWT_SECRET = 'gitlens-portal-super-secret-jwt-signing-key-32-bytes!';
 const ISSUER = 'gitlens-portal';
 
-function getJwtSecret(): Uint8Array {
+export function validateJwtConfig(): void {
   const envSecret = process.env.JWT_SECRET_KEY;
   if (process.env.NODE_ENV === 'production' && !process.env.VITEST) {
     if (!envSecret || envSecret === DEFAULT_JWT_SECRET || envSecret.length < 32) {
@@ -14,6 +14,11 @@ function getJwtSecret(): Uint8Array {
       );
     }
   }
+}
+
+function getJwtSecret(): Uint8Array {
+  validateJwtConfig();
+  const envSecret = process.env.JWT_SECRET_KEY;
   const secret = envSecret || DEFAULT_JWT_SECRET;
   return new TextEncoder().encode(secret);
 }

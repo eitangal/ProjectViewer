@@ -5,7 +5,7 @@ const ALGORITHM = 'aes-256-gcm';
 // 32-byte hex key (64 characters). Provide default fallback for local dev/testing if not in env
 const DEFAULT_DEV_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
-function getMasterKey(): Buffer {
+export function validateMasterKeyConfig(): void {
   const envKey = process.env.MASTER_ENCRYPTION_KEY;
   if (process.env.NODE_ENV === 'production' && !process.env.VITEST) {
     if (!envKey || envKey === DEFAULT_DEV_KEY) {
@@ -18,6 +18,12 @@ function getMasterKey(): Buffer {
   if (!/^[0-9a-fA-F]{64}$/.test(effectiveKey)) {
     throw new Error('MASTER_ENCRYPTION_KEY must be a 64-character (32-byte) hex string');
   }
+}
+
+function getMasterKey(): Buffer {
+  validateMasterKeyConfig();
+  const envKey = process.env.MASTER_ENCRYPTION_KEY;
+  const effectiveKey = envKey || DEFAULT_DEV_KEY;
   return Buffer.from(effectiveKey, 'hex');
 }
 

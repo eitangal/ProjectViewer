@@ -1,6 +1,12 @@
 import 'dotenv/config';
 import path from 'node:path';
 import { buildApp } from './app.js';
+import { validateJwtConfig } from './auth/tokenService.js';
+import { validateMasterKeyConfig } from './utils/crypto.js';
+
+// Pre-flight validation of production cryptographic secrets to fail fast on startup
+validateJwtConfig();
+validateMasterKeyConfig();
 
 const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
 const DB_PATH = process.env.DATABASE_PATH || path.join(DATA_DIR, 'portal.db');
