@@ -93,6 +93,81 @@ export const SandboxedHtmlRenderer: React.FC<{
     const interceptorScript = `
 <script id="gitportal-viewer-interceptor">
 (function() {
+  var rawBaseHref = ${JSON.stringify(safeBaseHref)};
+
+  // 1. Preset Docsify basePath so Docsify router resolves files against the raw file serving endpoint
+  try {
+    var _docsifyConfig = { basePath: rawBaseHref };
+    Object.defineProperty(window, '$docsify', {
+      configurable: true,
+      enumerable: true,
+      get: function() {
+        return _docsifyConfig;
+      },
+      set: function(val) {
+        if (val && typeof val === 'object') {
+          if (!val.basePath) {
+            val.basePath = rawBaseHref;
+          }
+        }
+        _docsifyConfig = val;
+      }
+    });
+  } catch (e) {}
+
+  // 2. URL normalizer for subresource requests within sandboxed iframe
+  function rewriteViewerUrl(url) {
+    if (typeof url !== 'string' || !url) return url;
+
+    // Strip srcdoc/ or /srcdoc/ prefix (iframe routing artifact)
+    var cleanUrl = url.replace(/^(\\/)?srcdoc\\//, '$1');
+
+    // Root-relative path (e.g. /docs/...) - rewrite against rawBaseHref directory
+    if (cleanUrl.startsWith('/') && !cleanUrl.startsWith('/api/viewer/') && !cleanUrl.startsWith('//')) {
+      return rawBaseHref + cleanUrl.replace(/^\\/+/, '');
+    }
+
+    // Relative path that previously had srcdoc/ prefix
+    if (url.startsWith('srcdoc/')) {
+      return rawBaseHref + url.replace(/^srcdoc\\//, '');
+    }
+
+    return cleanUrl;
+  }
+
+  // 3. Monkey-patch XMLHttpRequest.prototype.open
+  try {
+    var origXhrOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url, async, user, password) {
+      var targetUrl = rewriteViewerUrl(url);
+      return origXhrOpen.call(this, method, targetUrl, async, user, password);
+    };
+  } catch (e) {}
+
+  // 4. Monkey-patch window.fetch
+  try {
+    var origFetch = window.fetch;
+    if (typeof origFetch === 'function') {
+      window.fetch = function(input, init) {
+        if (typeof input === 'string') {
+          return origFetch.call(this, rewriteViewerUrl(input), init);
+        } else if (input && typeof input.url === 'string') {
+          var targetUrl = rewriteViewerUrl(input.url);
+          if (targetUrl !== input.url) {
+            try {
+              input = new Request(targetUrl, input);
+            } catch (err) {
+              return origFetch.call(this, targetUrl, init);
+            }
+          }
+          return origFetch.call(this, input, init);
+        }
+        return origFetch.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+
+  // 5. Link click interception
   function handleLinkClick(e) {
     var a = e.target;
     while (a && a.tagName !== 'A') {
@@ -163,20 +238,20 @@ export const SandboxedHtmlRenderer: React.FC<{
 
     if (!html.includes('<base ')) {
       if (html.includes('<head>')) {
-        html = html.replace('<head>', `<head>${baseTag}`);
+        html = html.replace('<head>', `<head>${baseTag}${interceptorScript}`);
       } else if (html.includes('<head ')) {
-        html = html.replace(/<head[^>]*>/, `$&${baseTag}`);
+        html = html.replace(/<head[^>]*>/, `$&${baseTag}${interceptorScript}`);
       } else {
-        html = `${baseTag}\n${html}`;
+        html = `${baseTag}\n${interceptorScript}\n${html}`;
       }
-    }
-
-    if (html.includes('</head>')) {
-      html = html.replace('</head>', `${interceptorScript}</head>`);
-    } else if (html.includes('</body>')) {
-      html = html.replace('</body>', `${interceptorScript}</body>`);
     } else {
-      html = `${html}\n${interceptorScript}`;
+      if (html.includes('<head>')) {
+        html = html.replace('<head>', `<head>${interceptorScript}`);
+      } else if (html.includes('<head ')) {
+        html = html.replace(/<head[^>]*>/, `$&${interceptorScript}`);
+      } else {
+        html = `${interceptorScript}\n${html}`;
+      }
     }
 
     return html;

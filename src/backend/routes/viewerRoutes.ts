@@ -128,8 +128,10 @@ export async function registerViewerRoutes(
     const rawPath = (req.params as any)['*'] || '';
     let normalizedPath = rawPath.replace(/^\/+/, '');
 
-    // Normalize potential Docsify or client routing artifact where index.html prefix is preserved
-    normalizedPath = normalizedPath.replace(/^index\.html\//, '').replace(/\/index\.html\//g, '/');
+    // Normalize potential Docsify or iframe routing artifacts where index.html or srcdoc prefixes are prepended
+    normalizedPath = normalizedPath
+      .replace(/^(index\.html\/|srcdoc\/)+/, '')
+      .replace(/\/(index\.html|srcdoc)\//g, '/');
 
     // Default to index.html if path is empty or ends with a slash
     if (!normalizedPath || normalizedPath === '') {
