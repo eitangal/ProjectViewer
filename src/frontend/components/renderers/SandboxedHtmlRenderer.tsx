@@ -227,13 +227,13 @@ export const SandboxedHtmlRenderer: React.FC<{
         </div>
       </div>
 
-      {/* Full-Bleed Interactive Sandbox Iframe (Opaque Origin: no allow-same-origin) */}
+      {/* Full-Bleed Interactive Sandbox Iframe (allow-same-origin enables authenticated relative subresource fetching) */}
       <iframe
         key={iframeKey}
         ref={iframeRef}
         title="Interactive HTML Application Viewport"
-        sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads"
-        allow="autoplay; fullscreen; encrypted-media"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
+        allow="autoplay; fullscreen; encrypted-media; camera; microphone"
         srcDoc={processedHtml}
         className="w-full flex-1 border-0 h-full bg-slate-950"
       />

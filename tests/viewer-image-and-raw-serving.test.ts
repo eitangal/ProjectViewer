@@ -201,4 +201,13 @@ describe('Raw File Serving & Binary Image Handling (viewer-image-and-raw-serving
     const decoded = Buffer.from(base64Data, 'base64');
     expect(decoded.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   });
+
+  it('SandboxedHtmlRenderer iframe includes allow-same-origin so embedded apps (Docsify) can fetch raw assets', async () => {
+    const rendererSource = await fs.readFile(
+      path.join(process.cwd(), 'src/frontend/components/renderers/SandboxedHtmlRenderer.tsx'),
+      'utf8'
+    );
+    expect(rendererSource).toContain('allow-same-origin');
+    expect(rendererSource).toContain('sandbox="allow-scripts allow-same-origin');
+  });
 });
