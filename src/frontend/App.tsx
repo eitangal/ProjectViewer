@@ -9,6 +9,7 @@ import { CollapsibleFileSidebar } from './components/viewer/CollapsibleFileSideb
 import { DocumentViewport } from './components/viewer/DocumentViewport.js';
 import { RagAssistantDrawer } from './components/viewer/RagAssistantDrawer.js';
 import { ProjectSummary, ViewerGroupSummary, ViewerMembershipSummary } from '@/shared/types.js';
+import { resolveDefaultProjectFile } from './utils/resolveDefaultProjectFile.js';
 import { Loader2 } from 'lucide-react';
 
 const queryClient = new QueryClient({
@@ -64,15 +65,15 @@ export function MainApp() {
         setUser(data.user);
         const params = new URLSearchParams(window.location.search);
         const hasPath = params.get('path');
-        if (hasPath) {
-          setActiveMainView('viewer');
-        } else if (data.user.role === 'SYSADMIN' || data.user.globalRole === 'SYSADMIN') {
-          setActiveMainView('admin-overview');
-        } else if (data.user.role === 'PUBLISHER' || data.user.globalRole === 'PUBLISHER') {
-          setActiveMainView('publisher-sync');
-        } else {
-          setActiveMainView('viewer');
+        const hasProj = params.get('projectId');
+        if (!hasProj) {
+          useViewerStore.setState({ projectId: '' });
         }
+        if (!hasPath) {
+          useViewerStore.setState({ activeFilePath: null, activeHash: null });
+        }
+        // After login always focus on viewer menu (for all roles)
+        setActiveMainView('viewer');
       } else {
         setUser(null);
       }
@@ -167,6 +168,20 @@ export function MainApp() {
 
   // Viewer file tree query - loaded for all authenticated users whenever active project exists
   const targetProjectId = projectId || activeProject?.id;
+  const [currentLoadedProjectId, setCurrentLoadedProjectId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (targetProjectId && targetProjectId !== currentLoadedProjectId) {
+      setCurrentLoadedProjectId(targetProjectId);
+      // When switching projects, clear activeFilePath so the new project selects its default file
+      // (index.html if exists, otherwise first file in view), unless URL explicitly had ?path=
+      const params = new URLSearchParams(window.location.search);
+      if (!params.get('path')) {
+        useViewerStore.setState({ activeFilePath: null, activeHash: null });
+      }
+    }
+  }, [targetProjectId, currentLoadedProjectId]);
+
   const viewerTreeUrl = targetProjectId
     ? `/api/viewer/${targetProjectId}/tree${previewGroupId ? `?previewGroupId=${previewGroupId}` : ''}`
     : null;
@@ -180,12 +195,16 @@ export function MainApp() {
   useEffect(() => {
     if (treeData?.authorizedPaths) {
       setAuthorizedPaths(treeData.authorizedPaths);
-      // Auto-select first document if none selected or if previously active file is no longer authorized
+      // Auto-select document if none selected or if previously active file is no longer authorized:
+      // Defaults to index.html of project if exists, otherwise first file in view
       if (
         treeData.authorizedPaths.length > 0 &&
         (!activeFilePath || !treeData.authorizedPaths.includes(activeFilePath))
       ) {
-        navigateToFile(treeData.authorizedPaths[0]);
+        const defaultFile = resolveDefaultProjectFile(treeData.authorizedPaths);
+        if (defaultFile) {
+          navigateToFile(defaultFile);
+        }
       }
     }
   }, [treeData, activeFilePath, setAuthorizedPaths, navigateToFile]);
@@ -220,14 +239,11 @@ export function MainApp() {
     setUser(loggedInUser);
     if (redirectProj) {
       setProjectId(redirectProj);
-      setActiveMainView('viewer');
-    } else if (loggedInUser.globalRole === 'SYSADMIN' || loggedInUser.role === 'SYSADMIN') {
-      setActiveMainView('admin-overview');
-    } else if (loggedInUser.globalRole === 'PUBLISHER' || loggedInUser.role === 'PUBLISHER') {
-      setActiveMainView('publisher-sync');
     } else {
-      setActiveMainView('viewer');
+      useViewerStore.setState({ projectId: '', activeFilePath: null, activeHash: null });
     }
+    // After login always focus on viewer menu (for all roles)
+    setActiveMainView('viewer');
   }, [setProjectId]);
 
   const handleLogout = async () => {

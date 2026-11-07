@@ -92,9 +92,19 @@ export const CollapsibleFileSidebar: React.FC<CollapsibleFileSidebarProps> = ({
   } = useViewerStore();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [isAdminOpen, setIsAdminOpen] = useState(true);
-  const [isPublisherOpen, setIsPublisherOpen] = useState(true);
+  // Admin and Publisher sections start collapsed by default so the Viewer menu is prioritized & focused for all roles
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [isPublisherOpen, setIsPublisherOpen] = useState(false);
   const [isViewerOpen, setIsViewerOpen] = useState(true);
+
+  // Auto-expand admin or publisher sections if activeView explicitly switches to them
+  React.useEffect(() => {
+    if (activeView.startsWith('admin-')) {
+      setIsAdminOpen(true);
+    } else if (activeView.startsWith('publisher-')) {
+      setIsPublisherOpen(true);
+    }
+  }, [activeView]);
 
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => {
     return new Set(tree.filter((n) => n.type === 'directory').map((n) => n.path));

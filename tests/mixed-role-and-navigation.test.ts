@@ -9,6 +9,7 @@ import { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/backend/app.js';
 import { PortalMailer } from '../src/backend/auth/mailer.js';
 import { getUserInitials } from '../src/frontend/components/common/ThemeAndUserControls.js';
+import { resolveDefaultProjectFile } from '../src/frontend/utils/resolveDefaultProjectFile.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -216,6 +217,40 @@ describe('Unified Navigation, User Initials & Mixed-Role Project Access', () => 
         headers: { Authorization: `Bearer ${user1Token}` },
       });
       expect(deleteAllowedRes.statusCode).toBe(200);
+    });
+  });
+
+  describe('Viewer Default File Resolution (resolveDefaultProjectFile)', () => {
+    it('defaults to root index.html when present', () => {
+      const files = ['README.md', 'index.html', 'src/main.ts', 'docs/guide.md'];
+      expect(resolveDefaultProjectFile(files)).toBe('index.html');
+    });
+
+    it('handles case-insensitive index.html / index.htm', () => {
+      expect(resolveDefaultProjectFile(['README.md', 'INDEX.HTML', 'src/main.ts'])).toBe('INDEX.HTML');
+      expect(resolveDefaultProjectFile(['README.md', 'index.htm', 'src/main.ts'])).toBe('index.htm');
+      expect(resolveDefaultProjectFile(['README.md', '/index.html', 'src/main.ts'])).toBe('/index.html');
+    });
+
+    it('defaults to nested index.html if root index.html is absent', () => {
+      const files = ['README.md', 'public/index.html', 'src/app.tsx'];
+      expect(resolveDefaultProjectFile(files)).toBe('public/index.html');
+    });
+
+    it('prioritizes root index.html over nested index.html', () => {
+      const files = ['dist/index.html', 'index.html', 'docs/index.html'];
+      expect(resolveDefaultProjectFile(files)).toBe('index.html');
+    });
+
+    it('falls back to the first file in view if no index.html exists in project', () => {
+      const files = ['docs/intro.md', 'README.md', 'src/index.ts'];
+      expect(resolveDefaultProjectFile(files)).toBe('docs/intro.md');
+    });
+
+    it('returns null for empty or invalid file lists', () => {
+      expect(resolveDefaultProjectFile([])).toBeNull();
+      expect(resolveDefaultProjectFile(null as any)).toBeNull();
+      expect(resolveDefaultProjectFile(undefined as any)).toBeNull();
     });
   });
 });
