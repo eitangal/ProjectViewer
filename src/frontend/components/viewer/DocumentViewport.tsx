@@ -6,6 +6,8 @@ import { MermaidBlock } from '../renderers/MermaidBlock.js';
 import { OpenApiSpecRenderer } from '../renderers/OpenApiSpecRenderer.js';
 import { SandboxedHtmlRenderer } from '../renderers/SandboxedHtmlRenderer.js';
 import { ImageViewer } from '../renderers/ImageViewer.js';
+import { PdfViewer } from '../renderers/PdfViewer.js';
+import { CsvViewer } from '../renderers/CsvViewer.js';
 import { RawCodeRenderer } from '../renderers/RawCodeRenderer.js';
 import { FileQuestion, Lock, Loader2 } from 'lucide-react';
 
@@ -131,6 +133,32 @@ export const DocumentViewport: React.FC<{
           filePath={activeFilePath}
           projectId={effectiveProjectId}
           content={content}
+        />
+      </main>
+    );
+  }
+
+  // 4. Full-Bleed PDF Viewport
+  if (format === 'pdf' && viewMode !== 'raw') {
+    return (
+      <main ref={viewportRef} className={`flex-1 min-w-0 h-full w-full overflow-hidden flex flex-col bg-slate-950 ${hiddenClass}`}>
+        <PdfViewer
+          filePath={activeFilePath}
+          projectId={effectiveProjectId}
+          content={content}
+        />
+      </main>
+    );
+  }
+
+  // 5. Full-Bleed Interactive CSV & TSV Table Viewport (Sortable & Filterable)
+  if (format === 'csv' && viewMode !== 'raw') {
+    return (
+      <main ref={viewportRef} className={`flex-1 min-w-0 h-full w-full overflow-hidden flex flex-col bg-slate-950 ${hiddenClass}`}>
+        <CsvViewer
+          filePath={activeFilePath}
+          content={content}
+          projectId={effectiveProjectId}
         />
       </main>
     );

@@ -1,4 +1,12 @@
-export type DocumentFormat = 'markdown' | 'openapi' | 'mermaid' | 'html' | 'code' | 'image';
+export type DocumentFormat =
+  | 'markdown'
+  | 'openapi'
+  | 'mermaid'
+  | 'html'
+  | 'code'
+  | 'image'
+  | 'csv'
+  | 'pdf';
 
 export const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif'];
 
@@ -9,6 +17,8 @@ export function detectDocumentFormat(filePath: string, content: string = ''): Do
   if (['mmd', 'mermaid'].includes(ext)) return 'mermaid';
   if (['html', 'htm'].includes(ext)) return 'html';
   if (IMAGE_EXTENSIONS.includes(ext)) return 'image';
+  if (ext === 'pdf') return 'pdf';
+  if (['csv', 'tsv'].includes(ext)) return 'csv';
 
   if (['yaml', 'yml', 'json'].includes(ext)) {
     // Fast regex check on first 1000 chars for OpenAPI / Swagger signature

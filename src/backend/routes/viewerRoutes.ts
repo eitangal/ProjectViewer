@@ -341,6 +341,10 @@ function getMimeType(filePath: string): string {
       return 'video/webm';
     case 'pdf':
       return 'application/pdf';
+    case 'csv':
+      return 'text/csv; charset=utf-8';
+    case 'tsv':
+      return 'text/tab-separated-values; charset=utf-8';
     case 'md':
       return 'text/markdown; charset=utf-8';
     case 'yaml':
